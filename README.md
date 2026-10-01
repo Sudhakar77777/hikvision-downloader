@@ -1,7 +1,3 @@
-Absolutely. For a public repo, I'd keep the README focused on **what it does, how the workflow works, how the project is structured, and how to run it**, without exposing infrastructure details.
-
- README.md
-
 # Hikvision Recording Downloader
 
  A small Python CLI for browsing and downloading recordings from a Hikvision NVR.
