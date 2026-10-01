@@ -1,0 +1,38 @@
+# Hikvision camera configuration example.
+#
+# Copy this file to:
+#
+#     config/cameras.toml
+#
+# Then replace the example values with the cameras configured on your NVR.
+#
+# The track IDs follow the common Hikvision channel/stream pattern:
+#
+#     101 = camera 1, main stream
+#     102 = camera 1, sub stream
+#
+#     201 = camera 2, main stream
+#     202 = camera 2, sub stream
+#
+# The actual track IDs should be verified against your NVR.
+
+[[cameras]]
+number = 1
+name = "CameraOne"
+ip_address = "CAMERA_IP"
+main_track = 101
+sub_track = 102
+
+[[cameras]]
+number = 2
+name = "CameraTwo"
+ip_address = "CAMERA_IP"
+main_track = 201
+sub_track = 202
+
+[[cameras]]
+number = 3
+name = "CameraThree"
+ip_address = "CAMERA_IP"
+main_track = 301
+sub_track = 302
