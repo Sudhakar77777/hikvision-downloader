@@ -1,3 +1,22 @@
+## Why This Project?
+
+Hikvision NVRs provide a local web portal (typically accessed via `http://<NVR-IP>/doc/page/login.asp`) to configure settings and export footage over your local network. However, retrieving video through this native browser interface is notoriously unreliable:
+
+* **Frequent Freezes & Hangs:** Browser-based transfers routinely stall or crash mid-stream.
+* **Strict Concurrency Limits:** The web app restricts you to downloading only 2–3 files at a time.
+* **Painful Manual Batching:** Exporting 100+ recordings from a single day requires clicking and babysitting every file individually.
+
+---
+
+### How It Works
+
+This tool bypasses the fragile web UI to provide a direct, automated pipeline between your machine and the NVR over LAN:
+
+1. **Local Authentication:** Connects directly to your NVR's endpoint using your credentials/session cookie. **TODO: Hardcoded currently**
+2. **Interactive Querying:** Prompts you for the target date, camera channel, and timeframe, querying the NVR's internal database directly.
+3. **Format & Stream Selection:** Lets you choose between HD (main stream) or SD (sub-stream) quality.
+4. **Resilient Batch Download:** Pulls the complete list of matching files sequentially or concurrently straight to your local drive—without browser throttling or manual intervention.
+
 # Hikvision Recording Downloader
 
  A small Python CLI for browsing and downloading recordings from a Hikvision NVR.

@@ -12,7 +12,7 @@ CAMERA_CONFIG = PROJECT_ROOT / "config" / "cameras.toml"
 
 config = dotenv_values(ENV_FILE)
 
-NVR_HOST = config.get("HIKVISION_HOST", "192.168.1.5")
+NVR_HOST = config.get("HIKVISION_HOST")
 COOKIE = config.get("HIKVISION_COOKIE")
 
 if not COOKIE:
