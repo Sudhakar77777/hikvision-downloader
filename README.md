@@ -494,6 +494,19 @@ output/
 - **Human-readable output** — the CLI is designed for interactive use rather than being a thin wrapper around API calls.
 - **No hardcoded infrastructure in documentation** — deployment-specific addresses and credentials stay local.
 
+## Running Tests & Quality Checks
+
+Run the offline test suite:
+```bash
+uv run pytest -m "not integration"
+```
+
+Run static type checking and linting:
+```bash
+uv run mypy src tests
+uv run ruff check src tests
+```
+
  ## Important note
 
  This project is designed for use with Hikvision NVR systems exposing the relevant ISAPI recording endpoints.

@@ -299,3 +299,22 @@ output/
 2. **State Isolation:** Core services must not rely on global mutable singletons. Sessions and configuration parameters are passed explicitly to service functions.
 3. **No Duplicate API Logic:** All ISAPI XML generation and HTTP endpoints are centralized within their respective `core/` modules.
 4. **Resilient HTTP Transport:** All network calls funnel through `http_client.py` to enforce retry counts, backoff timings, and uniform timeout policies.
+
+---
+
+## 7. Testing Architecture & Verification Contracts
+
+The testing suite is structured into dedicated tiers:
+```
+tests/
+├── fixtures/     # Synthetic ISAPI XML payloads (daily distribution, CMSearch)
+├── unit/         # Model validations, XML generation/parsing, and TOML loading
+├── functional/   # Streaming downloads, .part atomicity, skip caching, and cancellation
+└── integration/  # Live NVR hardware checks (tagged with @pytest.mark.integration)
+```
+
+### Execution Invariants:
+1. **Offline Isolation:** All tests under `tests/unit/` and `tests/functional/` run 100% offline without network I/O.
+2. **Graceful Degradation:** Integration tests requiring live hardware automatically skip when `.env` is absent or unreachable.
+3. **Strict Typing:** All test functions, fixtures, and helpers enforce 100% type annotations with zero bare `Any`.
+

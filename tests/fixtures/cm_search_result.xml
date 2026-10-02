@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CMSearchResult xmlns="http://www.isapi.org/ver20/XMLSchema" version="2.0">
+    <searchID>{cbd5fc36-eb50-0001-c5a1-13931ff0d7a0}</searchID>
+    <responseStatus>true</responseStatus>
+    <responseStatusStrg>OK</responseStatusStrg>
+    <numOfMatches>2</numOfMatches>
+    <matchList>
+        <searchMatchItem>
+            <sourceID>{00000000-0000-0000-0000-000000000000}</sourceID>
+            <trackID>101</trackID>
+            <timeSpan>
+                <startTime>2026-09-15T00:00:00Z</startTime>
+                <endTime>2026-09-15T00:15:00Z</endTime>
+            </timeSpan>
+            <mediaSegmentDescriptor>
+                <contentType>video</contentType>
+                <codecType>H.264</codecType>
+                <playbackURI>rtsp://192.168.1.100/Streaming/tracks/101?starttime=20260915T000000Z&amp;endtime=20260915T001500Z&amp;name=ch01_20260915_000000.mp4&amp;size=52428800</playbackURI>
+            </mediaSegmentDescriptor>
+        </searchMatchItem>
+        <searchMatchItem>
+            <sourceID>{00000000-0000-0000-0000-000000000000}</sourceID>
+            <trackID>101</trackID>
+            <timeSpan>
+                <startTime>2026-09-15T00:15:00Z</startTime>
+                <endTime>2026-09-15T00:30:00Z</endTime>
+            </timeSpan>
+            <mediaSegmentDescriptor>
+                <contentType>video</contentType>
+                <codecType>H.264</codecType>
+                <playbackURI>rtsp://192.168.1.100/Streaming/tracks/101?starttime=20260915T001500Z&amp;endtime=20260915T003000Z&amp;name=ch01_20260915_001500.mp4&amp;size=62914560</playbackURI>
+            </mediaSegmentDescriptor>
+        </searchMatchItem>
+    </matchList>
+</CMSearchResult>

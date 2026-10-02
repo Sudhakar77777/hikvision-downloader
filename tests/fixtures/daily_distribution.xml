@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dailyDistribution xmlns="http://www.isapi.org/ver20/XMLSchema" version="2.0">
+    <day>
+        <dayOfMonth>1</dayOfMonth>
+        <record>true</record>
+    </day>
+    <day>
+        <dayOfMonth>2</dayOfMonth>
+        <record>false</record>
+    </day>
+    <day>
+        <dayOfMonth>15</dayOfMonth>
+        <record>true</record>
+    </day>
+    <day>
+        <dayOfMonth>28</dayOfMonth>
+        <record>true</record>
+    </day>
+</dailyDistribution>

@@ -31,6 +31,7 @@ extend-select = ["I"]
 dev = [
     "mypy>=1.15.0",
     "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
     "ruff>=0.16.10",
     "types-requests>=2.32.0",
 ]
@@ -43,5 +44,16 @@ warn_unused_ignores = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests as integration tests that require live NVR hardware (deselect with '-m \"not integration\"')",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+]
+
 
 

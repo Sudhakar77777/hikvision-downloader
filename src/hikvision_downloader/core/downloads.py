@@ -182,7 +182,8 @@ def download_recordings(
                 error_message="Batch download cancelled by user",
             )
 
-        destination = output_dir / f"{offset}_{recording.name}.mp4"
+        filename = f"{offset}_{recording.name}" if recording.name.endswith(".mp4") else f"{offset}_{recording.name}.mp4"
+        destination = output_dir / filename
 
         success, _duration, actual_size, is_skipped, error_msg = download_recording(
             session=session,
