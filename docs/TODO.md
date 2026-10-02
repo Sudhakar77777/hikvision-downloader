@@ -2,30 +2,22 @@
 
  Roadmap for making Hikvision Downloader a reusable, public, cross-platform application.
 
- ## 1\. Remove Hardcoded Camera Configuration
+ ## 1\. User-Configured Camera Profiles and Discovery
 
- **Status:** Open
+ **Status:** Implemented (TOML Config) / Open (Auto-Discovery)
 
- The current camera definitions are hardcoded in `cameras.py`, including:
+ Camera definitions are decoupled from source code and dynamically loaded from `config/cameras.toml` (with a safe template in `config/cameras.example.toml`).
 
+ Configured fields:
  - Camera number
-- Camera name
-- Camera IP address
-- Main stream track ID
-- Sub stream track ID
+ - Camera name
+ - Camera IP address
+ - Main stream track ID (`main_track`)
+ - Sub stream track ID (`sub_track`)
 
- ### Goal
-
- Make camera configuration user-provided rather than tied to one particular NVR installation.
-
- Possible approaches to evaluate:
-
- - Import camera/channel information from the NVR.
-- Discover available tracks through the Hikvision API.
-- Allow users to configure cameras through the application.
-- Persist configuration locally.
-
- The final application should not contain installation-specific camera names or IP addresses.
+ ### Future Enhancements
+ - Automatically query and discover camera/channel information from the NVR via ISAPI.
+ - In-app UI management for camera profiles.
 
 ---
 
@@ -284,7 +276,7 @@ recording exists for that day
 
  ## 7\. Camera / Stream Model
 
- **Status:** Partially Implemented
+ **Status:** Implemented
 
  The current track convention is:
 
@@ -319,7 +311,7 @@ SD
 
  ## 8\. Output Directory Convention
 
- **Status:** Implemented / Verify
+ **Status:** Implemented
 
  Downloads should be organized by date, camera and stream.
 
@@ -772,24 +764,24 @@ CI             GitHub Actions
  ## Definition of Done for Public v1
 
  - [ ] No private IP addresses in repository
-- [ ] No cookies or credentials in repository
-- [ ] Camera discovery/configuration no longer hardcoded to one installation
-- [ ] NVR username/password login implemented
-- [ ] Session handling implemented securely
-- [ ] PySide6 desktop UI implemented
-- [ ] Python core separated from UI
-- [ ] Date discovery working
-- [ ] Camera/stream selection working
-- [ ] Recording search working
-- [ ] Download workflow working
-- [ ] Output naming finalized
-- [ ] Tests added
-- [ ] Lint/type checks added
-- [ ] GitHub Actions added
-- [ ] macOS build tested
-- [ ] Windows build tested
-- [ ] License added
-- [ ] Third-party notices reviewed
-- [ ] README cleaned of private/install-specific information
-- [ ] Release packaging documented
-- [ ] No Docker dependency
+ - [ ] No cookies or credentials in repository
+ - [x] Camera configuration no longer hardcoded to one installation (TOML-based)
+ - [ ] NVR username/password login implemented
+ - [ ] Session handling implemented securely
+ - [ ] PySide6 desktop UI implemented
+ - [ ] Python core separated from UI
+ - [x] Date discovery working
+ - [x] Camera/stream selection working
+ - [x] Recording search working
+ - [x] Download workflow working
+ - [x] Output naming finalized
+ - [ ] Tests added
+ - [ ] Lint/type checks added
+ - [ ] GitHub Actions added
+ - [ ] macOS build tested
+ - [ ] Windows build tested
+ - [ ] License added
+ - [ ] Third-party notices reviewed
+ - [x] README cleaned of private/install-specific information
+ - [ ] Release packaging documented
+ - [x] No Docker dependency

@@ -12,7 +12,7 @@ Hikvision NVRs provide a local web portal (typically accessed via `http://<NVR-I
 
 This tool bypasses the fragile web UI to provide a direct, automated pipeline between your machine and the NVR over LAN:
 
-1. **Local Authentication:** Connects directly to your NVR's endpoint using your credentials/session cookie. **TODO: Hardcoded currently**
+1. **Local Authentication:** Connects directly to your NVR's endpoint using your credentials/session cookie configured via `.env`.
 2. **Interactive Querying:** Prompts you for the target date, camera channel, and timeframe, querying the NVR's internal database directly.
 3. **Format & Stream Selection:** Lets you choose between HD (main stream) or SD (sub-stream) quality.
 4. **Resilient Batch Download:** Pulls the complete list of matching files sequentially or concurrently straight to your local drive—without browser throttling or manual intervention.
@@ -246,7 +246,7 @@ output/
     ├── 1_<recording>.mp4
     ├── 2_<recording>.mp4
     ├── 3_<recording>.mp4
-    └── 20260915_D4_FirstFL_HD_recording-list.csv
+    └── 2026-09-15_D4_FirstFL_HD_recording-list.csv
 ```
 
  A different stream is kept separate:
@@ -382,9 +382,7 @@ uv sync
 
  ## Configuration
 
- Create a local `.env` file containing the credentials/session information required by your NVR.
-
- For example:
+ 1. **Environment Setup:** Create a local `.env` file by copying `.env.sample` and setting your NVR host and session cookie:
 
 ```
 HIKVISION_HOST=<your-nvr-host>
@@ -393,13 +391,16 @@ HIKVISION_COOKIE=<your-session-cookie>
 
  Do **not** commit `.env` to the repository.
 
- A public repository should contain only a safe example configuration such as:
+ 2. **Camera Configuration:** Create `config/cameras.toml` by copying `config/cameras.example.toml` and configuring the cameras and track IDs available on your NVR:
 
+```toml
+[[cameras]]
+number = 1
+name = "CameraOne"
+ip_address = "192.168.1.100"
+main_track = 101
+sub_track = 102
 ```
-.env.example
-```
-
- with placeholders rather than real infrastructure details or credentials.
 
  ## Running
 
@@ -467,7 +468,7 @@ output/
     ├── 2_....mp4
     ├── ...
     ├── 10_....mp4
-    └── 20260915_D4_FirstFL_HD_recording-list.csv
+    └── 2026-09-15_D4_FirstFL_HD_recording-list.csv
 ```
 
  ## Design goals
