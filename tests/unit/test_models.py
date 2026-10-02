@@ -95,10 +95,11 @@ def test_camera_invalid_stream_type() -> None:
         sub_track=TrackId(102),
     )
     with pytest.raises(ValueError, match="Unknown stream type"):
-        cam.stream_quality("invalid")  # type: ignore[arg-type]
+        cam.stream_quality("invalid")
 
     with pytest.raises(ValueError, match="Unknown stream type"):
-        cam.track_id("invalid")  # type: ignore[arg-type]
+        cam.track_id("invalid")
+
 
 
 def test_recording_date_valid() -> None:

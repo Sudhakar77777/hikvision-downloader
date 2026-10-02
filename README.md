@@ -12,7 +12,7 @@ Hikvision NVRs provide a local web portal (typically accessed via `http://<NVR-I
 
 This tool bypasses the fragile web UI to provide a direct, automated pipeline between your machine and the NVR over LAN:
 
-1. **Local Authentication:** Connects directly to your NVR's endpoint using your credentials/session cookie configured via `.env`.
+1. **Local Authentication:** Connects directly to your NVR's endpoint using HTTP Digest/Basic authentication configured via `.env`.
 2. **Interactive Querying:** Prompts you for the target date, camera channel, and timeframe, querying the NVR's internal database directly.
 3. **Format & Stream Selection:** Lets you choose between HD (main stream) or SD (sub-stream) quality.
 4. **Resilient Batch Download:** Pulls the complete list of matching files sequentially or concurrently straight to your local drive—without browser throttling or manual intervention.
@@ -394,25 +394,25 @@ uv sync
 
  ## Configuration
 
- 1. **Environment Setup:** Create a local `.env` file by copying `.env.sample` and setting your NVR host and session cookie:
+ 1. **Environment Setup:** Create a local `.env` file by copying `.env.example` and setting your NVR connection credentials:
 
-```
-HIKVISION_HOST=<your-nvr-host>
-HIKVISION_COOKIE=<your-session-cookie>
+```dotenv
+# Hikvision NVR Connection Configuration
+HIKVISION_HOST=192.168.1.10
+HIKVISION_PORT=80
+HIKVISION_USERNAME=admin
+HIKVISION_PASSWORD=your_secure_password
+
+# Concurrency Engine (1 to 4 workers, default: 2)
+HIKVISION_MAX_WORKERS=2
+
+# Optional legacy session cookie fallback (deprecated)
+# HIKVISION_COOKIE=WebSession_d23e9a1027=ENTER_COOKIE_VALUE
 ```
 
  Do **not** commit `.env` to the repository.
 
- 2. **Camera Configuration:** Create `config/cameras.toml` by copying `config/cameras.example.toml` and configuring the cameras and track IDs available on your NVR:
-
-```toml
-[[cameras]]
-number = 1
-name = "CameraOne"
-ip_address = "192.168.1.100"
-main_track = 101
-sub_track = 102
-```
+ 2. **Camera Discovery:** Cameras and stream track IDs (Main/Sub) are automatically discovered from your NVR dynamically over ISAPI. Optional local overrides can be specified via `config/cameras.toml` if desired.
 
  ## Running
 
@@ -425,8 +425,8 @@ uv run hikvision-downloader
  Or run in headless automation mode with flags:
 
 ```bash
-# Download all recordings from Camera 1 HD stream for a specific date
-uv run hikvision-downloader --date 2026-09-15 --camera 1 --stream main --non-interactive
+# Download all recordings from Camera 1 HD stream for a specific date using 2 concurrent workers
+uv run hikvision-downloader --date 2026-09-15 --camera 1 --stream main -w 2 --non-interactive
 
 # Download a specific range of recordings with custom destination
 uv run hikvision-downloader --date 2026-09-15 --camera 1 --stream main --range 1-10 --output-dir ./archive --non-interactive
@@ -437,13 +437,19 @@ uv run hikvision-downloader --date 2026-09-15 --camera 1 --stream main --range 1
  | Argument | Description |
  |---|---|
  | `--host <HOST>` | NVR IP address or hostname (overrides `HIKVISION_HOST` from `.env`). |
+ | `--port <PORT>` | NVR HTTP/ISAPI port (overrides `HIKVISION_PORT` from `.env`, default: `80`). |
+ | `-u, --username <USER>` | NVR username (overrides `HIKVISION_USERNAME` from `.env`). |
+ | `-p, --password <PASS>` | NVR password (overrides `HIKVISION_PASSWORD` from `.env`). |
+ | `-w, --workers <1-4>` | Number of concurrent download workers (1 to 4, default: `2`). |
+ | `--refresh-cameras` | Bypass discovery cache and force fresh camera discovery from NVR. |
  | `--date <YYYY-MM-DD>` | Target recording date in ISO format. |
  | `--camera <ID/NAME>` | Camera channel number (e.g. `1`) or camera name (e.g. `FrontGate`). |
  | `--stream <main\|sub>` | Stream quality: `main` (HD) or `sub` (SD). |
  | `--range <RANGE>` | Recording range: `all`, `START-END` (e.g. `1-10`), or `START COUNT` (e.g. `1 10`). |
  | `--output-dir <PATH>` | Custom output directory path. |
  | `--non-interactive` | Run without interactive prompts (fails if required options are omitted). |
- | `--help` | Show command documentation and exit options. |
+ | `--version` | Show program version number and exit. |
+ | `-h, --help` | Show command documentation and exit options. |
 
  When run interactively without flags, the workflow guides you through:
 

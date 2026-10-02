@@ -55,10 +55,9 @@ The core mission of this project is to provide a **reusable, public, cross-platf
   `output/YYYYMMDD_D<camera_number>_<camera_name>_<stream>/`
 
 ### FR-6: Authentication & Session Management
-- **FR-6.1 (Development / Testing):** The system shall support authenticating via an existing `HIKVISION_COOKIE` defined in `.env`.
-- **FR-6.2 (Public v1 Goal):** The system shall authenticate against the NVR using user-supplied credentials (`NVR host`, `username`, `password`) over ISAPI, generating and refreshing the required WebSession cookie automatically without requiring browser inspection.
-- **FR-6.3:** Passwords must never be written to source code, logged, or exposed in error messages.
-- **FR-6.4:** Persistent credential storage (optional in CLI/GUI) shall use secure OS keychains (`keyring` / Apple Keychain / Windows Credential Manager) rather than plain text files.
+- **FR-6.1:** The system shall authenticate against the NVR using user-supplied credentials (`NVR host`, `username`, `password`) over ISAPI using HTTP Digest or Basic authentication.
+- **FR-6.2:** Passwords must never be written to source code, logged, or exposed in error messages.
+- **FR-6.3:** Persistent credential storage (optional in CLI/GUI) shall use secure OS keychains (`keyring` / Apple Keychain / Windows Credential Manager) rather than plain text files.
 
 ---
 

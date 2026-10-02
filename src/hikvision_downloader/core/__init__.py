@@ -1,4 +1,10 @@
-from .cameras import load_cameras
+from .auth import create_authenticated_session
+from .cameras import (
+    CameraDiscoveryService,
+    discover_cameras_isapi,
+    format_host_port,
+    load_cameras,
+)
 from .dates import (
     build_daily_distribution_xml,
     discover_available_dates,
@@ -10,6 +16,7 @@ from .downloads import (
     build_download_url,
     download_recording,
     download_recordings,
+    download_recordings_concurrent,
     format_duration,
 )
 from .models import (
@@ -43,6 +50,7 @@ from .recordings import (
 __all__ = [
     "ByteCount",
     "Camera",
+    "CameraDiscoveryService",
     "CameraNumber",
     "DownloadProgress",
     "DownloadResult",
@@ -60,10 +68,14 @@ __all__ = [
     "build_daily_distribution_xml",
     "build_download_url",
     "build_search_xml",
+    "create_authenticated_session",
     "discover_available_dates",
+    "discover_cameras_isapi",
     "download_recording",
     "download_recordings",
+    "download_recordings_concurrent",
     "format_duration",
+    "format_host_port",
     "get_all_recordings",
     "get_query_value",
     "load_cameras",

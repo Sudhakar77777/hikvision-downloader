@@ -25,7 +25,7 @@ Phase 3: Testing & Fixture-Based Mocking Suite (Task 004) [COMPLETED]
    │
 Phase 4: Headless CLI Engine & Entry Point (Task 005) [COMPLETED]
    │
-Phase 5: NVR Authentication, ISAPI Auto-Discovery & Concurrent Engine (Task 006) [CURRENT]
+Phase 5: NVR Authentication, ISAPI Auto-Discovery & Concurrent Engine (Task 006) [COMPLETED]
    │
 Phase 6: PySide6 Native Desktop GUI & Secure OS Credential Store (Task 007)
    │
@@ -84,13 +84,12 @@ Phase 7: Packaging, CI/CD, & Public Release (Task 008)
 
 ### Phase 5: NVR Authentication, ISAPI Auto-Discovery & Concurrent Engine
 - **Task ID:** `006-auth-discovery-concurrency`
-- **Status:** Planned
+- **Status:** **Completed**
 - **Deliverables:**
-  - Replace manual `HIKVISION_COOKIE` extraction with automated username and password authentication over ISAPI (challenge/response & session cookie acquisition).
-  - In-memory session renewal on HTTP 401 response.
-  - **ISAPI Dynamic Camera Auto-Discovery:** Query NVR channels and track configurations dynamically via ISAPI endpoints, removing the strict need for manual TOML editing while retaining TOML as an optional override.
+  - Automated username and password authentication over ISAPI (HTTP Digest / Basic authentication).
+  - Fast single-request validation with immediate abort on 401/403 to prevent NVR security lockouts.
+  - **ISAPI Dynamic Camera Auto-Discovery:** Query NVR channels and track configurations dynamically via ISAPI endpoints (`/ISAPI/ContentMgmt/record/tracks` and `/ISAPI/Streaming/channels`), removing the strict need for manual TOML editing while retaining TOML as an optional override.
   - **Concurrent Multi-Stream Downloads:** Implement a thread pool worker for high-bandwidth LAN batch downloading with thread-safe progress aggregation and rate calculation.
-  - Preserve `.env` session cookie support strictly as an optional developer override.
   - Enforce zero credential logging or exposure.
 
 ---

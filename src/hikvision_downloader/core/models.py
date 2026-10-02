@@ -26,6 +26,7 @@ class StreamType(StrEnum):
 
     MAIN = "main"
     SUB = "sub"
+    THIRD = "third"
 
 
 class StreamQuality(StrEnum):
@@ -33,6 +34,7 @@ class StreamQuality(StrEnum):
 
     HD = "HD"
     SD = "SD"
+    PREVIEW = "Preview"
 
 
 # ============================================================
@@ -49,15 +51,19 @@ class Camera(BaseModel):
     name: str = Field(..., min_length=1, description="Camera display name")
     ip_address: str = Field(..., min_length=1, description="Camera IP address or hostname")
     main_track: TrackId = Field(..., description="Main stream ISAPI track ID")
-    sub_track: TrackId = Field(..., description="Sub stream ISAPI track ID")
+    sub_track: TrackId = Field(default=TrackId(0), description="Sub stream ISAPI track ID")
+    tracks: dict[str, TrackId] = Field(
+        default_factory=dict,
+        description="Complete mapping of stream names (main, sub, third, custom) to track IDs",
+    )
 
     @model_validator(mode="after")
     def validate_camera_fields(self) -> Self:
         if int(self.number) < 1:
             raise ValueError(f"Camera number must be >= 1, got {self.number}")
-        if int(self.main_track) < 1:
+        if int(self.main_track) < 1 and not self.tracks:
             raise ValueError(f"Main track ID must be >= 1, got {self.main_track}")
-        if int(self.sub_track) < 1:
+        if int(self.sub_track) < 1 and not self.tracks:
             raise ValueError(f"Sub track ID must be >= 1, got {self.sub_track}")
         return self
 
@@ -71,24 +77,62 @@ class Camera(BaseModel):
         """Return sanitized folder-safe name (e.g., 'D1_MainGate')."""
         return f"D{self.number}_{self.name}"
 
-    def stream_quality(self, stream: StreamType) -> StreamQuality:
-        """Map stream type to user-facing quality enum."""
-        if stream == StreamType.MAIN:
+    def stream_quality(self, stream: str | StreamType) -> StreamQuality | str:
+        """Map stream identifier to human-readable quality descriptor."""
+        s = str(stream).lower().replace("streamtype.", "")
+        if s in ("main", "hd", "1"):
             return StreamQuality.HD
-        if stream == StreamType.SUB:
+        if s in ("sub", "sd", "2"):
             return StreamQuality.SD
+        if s in ("third", "preview", "3"):
+            return StreamQuality.PREVIEW
+        if self.tracks and s in self.tracks:
+            return s.upper()
         raise ValueError(f"Unknown stream type: {stream}")
 
-    def stream_name(self, stream: StreamType) -> str:
-        """Return string quality name ('HD' / 'SD') for backwards compatibility."""
-        return self.stream_quality(stream).value
+    def stream_name(self, stream: str | StreamType) -> str:
+        """Return string quality name ('HD' / 'SD' / custom) for backwards compatibility."""
+        res = self.stream_quality(stream)
+        return res.value if isinstance(res, StreamQuality) else str(res)
 
-    def track_id(self, stream: StreamType) -> TrackId:
-        """Return the NVR track ID for the specified stream type."""
-        if stream == StreamType.MAIN:
+    def track_id(self, stream: str | StreamType) -> TrackId:
+        """Return the NVR track ID for the specified stream type or stream key."""
+        stream_key = str(stream).lower().replace("streamtype.", "")
+
+        if self.tracks and stream_key in self.tracks:
+            return self.tracks[stream_key]
+
+        if stream_key in ("main", "1"):
+            return self.tracks.get("main", self.main_track) if self.tracks else self.main_track
+
+        if stream_key in ("sub", "2"):
+            if self.tracks and "sub" in self.tracks:
+                return self.tracks["sub"]
+            if int(self.sub_track) > 0:
+                return self.sub_track
+
+        if stream_key in ("third", "3") and self.tracks and "third" in self.tracks:
+            return self.tracks["third"]
+
+        # Check direct track ID match
+        if stream_key.isdigit():
+            val = int(stream_key)
+            for trk in self.tracks.values():
+                if int(trk) == val:
+                    return trk
+            if val > 0 and not self.tracks:
+                return TrackId(val)
+
+        # Case-insensitive match in tracks
+        for k, v in self.tracks.items():
+            if k.lower() == stream_key:
+                return v
+
+        if stream_key == "main" and int(self.main_track) > 0:
             return self.main_track
-        if stream == StreamType.SUB:
+        if stream_key == "sub" and int(self.sub_track) > 0:
             return self.sub_track
+
         raise ValueError(f"Unknown stream type: {stream}")
 
 

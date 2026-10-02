@@ -16,6 +16,7 @@ from hikvision_downloader.cli.app import (
     setup_signal_handler,
 )
 from hikvision_downloader.cli.formatters import display_abort_notice, display_error
+from hikvision_downloader.core.cameras import CameraDiscoveryService
 from hikvision_downloader.core.models import (
     ByteCount,
     Camera,
@@ -59,6 +60,12 @@ def test_argument_parser_defaults() -> None:
     args = parser.parse_args([])
 
     assert args.host is None
+    assert args.port is None
+    assert args.username is None
+    assert args.password is None
+    assert args.auth_type is None
+    assert args.workers is None
+    assert args.refresh_cameras is False
     assert args.date is None
     assert args.camera is None
     assert args.stream is None
@@ -73,6 +80,17 @@ def test_argument_parser_all_flags() -> None:
         [
             "--host",
             "192.168.1.200",
+            "--port",
+            "8080",
+            "-u",
+            "admin",
+            "-p",
+            "secret",
+            "--auth-type",
+            "basic",
+            "-w",
+            "3",
+            "--refresh-cameras",
             "--date",
             "2024-03-15",
             "--camera",
@@ -88,6 +106,12 @@ def test_argument_parser_all_flags() -> None:
     )
 
     assert args.host == "192.168.1.200"
+    assert args.port == 8080
+    assert args.username == "admin"
+    assert args.password == "secret"
+    assert args.auth_type == "basic"
+    assert args.workers == 3
+    assert args.refresh_cameras is True
     assert args.date == "2024-03-15"
     assert args.camera == "1"
     assert args.stream == "main"
@@ -105,8 +129,9 @@ def test_argument_parser_help_and_epilog(capsys: pytest.CaptureFixture[str]) -> 
     captured = capsys.readouterr()
     assert "hikvision-downloader" in captured.out
     assert "Ctrl+C" in captured.out
+    assert "--workers" in captured.out
+    assert "--refresh-cameras" in captured.out
     assert "--non-interactive" in captured.out
-    assert ".part" in captured.out
 
 
 # ============================================================
@@ -189,7 +214,6 @@ def test_parse_range_spec_invalid() -> None:
         parse_range_spec("invalid_range", 50)
 
 
-
 # ============================================================
 # Camera Resolver Tests
 # ============================================================
@@ -261,17 +285,29 @@ def test_setup_signal_handler() -> None:
 # ============================================================
 
 
-def test_run_app_missing_host(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_app_missing_host() -> None:
     with patch("hikvision_downloader.cli.app.NVR_HOST", None):
         exit_code = run_app([])
+        assert exit_code == 1
+
+
+def test_run_app_non_interactive_missing_credentials() -> None:
+    with (
+        patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", None),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", None),
+    ):
+        exit_code = run_app(["--non-interactive", "--date", "2024-03-15", "--camera", "1", "--stream", "main"])
         assert exit_code == 1
 
 
 def test_run_app_non_interactive_missing_date(sample_cameras: dict[CameraNumber, Camera]) -> None:
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
     ):
         exit_code = run_app(["--non-interactive", "--camera", "1", "--stream", "main"])
         assert exit_code == 1
@@ -280,8 +316,10 @@ def test_run_app_non_interactive_missing_date(sample_cameras: dict[CameraNumber,
 def test_run_app_non_interactive_missing_camera(sample_cameras: dict[CameraNumber, Camera]) -> None:
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
     ):
         exit_code = run_app(["--non-interactive", "--date", "2024-03-15", "--stream", "main"])
         assert exit_code == 1
@@ -290,8 +328,10 @@ def test_run_app_non_interactive_missing_camera(sample_cameras: dict[CameraNumbe
 def test_run_app_non_interactive_missing_stream(sample_cameras: dict[CameraNumber, Camera]) -> None:
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
     ):
         exit_code = run_app(["--non-interactive", "--date", "2024-03-15", "--camera", "1"])
         assert exit_code == 1
@@ -318,11 +358,13 @@ def test_run_app_non_interactive_success(sample_cameras: dict[CameraNumber, Came
 
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
         patch("hikvision_downloader.cli.app.get_all_recordings", return_value=mock_recordings),
         patch("hikvision_downloader.cli.app.save_recording_list", return_value=tmp_path / "recordings.csv"),
-        patch("hikvision_downloader.cli.app.download_recordings", return_value=mock_result),
+        patch("hikvision_downloader.cli.app.download_recordings_concurrent", return_value=mock_result),
     ):
         exit_code = run_app(
             [
@@ -365,11 +407,13 @@ def test_run_app_download_failure(sample_cameras: dict[CameraNumber, Camera], tm
 
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
         patch("hikvision_downloader.cli.app.get_all_recordings", return_value=mock_recordings),
         patch("hikvision_downloader.cli.app.save_recording_list", return_value=tmp_path / "recordings.csv"),
-        patch("hikvision_downloader.cli.app.download_recordings", return_value=mock_result),
+        patch("hikvision_downloader.cli.app.download_recordings_concurrent", return_value=mock_result),
     ):
         exit_code = run_app(
             [
@@ -385,20 +429,41 @@ def test_run_app_download_failure(sample_cameras: dict[CameraNumber, Camera], tm
         assert exit_code == 1
 
 
-def test_run_app_keyboard_interrupt_handled(sample_cameras: dict[CameraNumber, Camera]) -> None:
+def test_run_app_keyboard_interrupt_handled() -> None:
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", side_effect=KeyboardInterrupt),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session", side_effect=KeyboardInterrupt),
     ):
         exit_code = run_app([])
         assert exit_code == 130
 
 
+def test_run_app_interactive_credentials_prompt(sample_cameras: dict[CameraNumber, Camera]) -> None:
+    with (
+        patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", None),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", None),
+        patch("builtins.input", return_value="admin"),
+        patch("getpass.getpass", return_value="secretpass"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session") as mock_auth,
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
+        patch("hikvision_downloader.cli.app.discover_dates", return_value={}),
+        patch("hikvision_downloader.cli.app.ask_recording_date", return_value=None),
+    ):
+        exit_code = run_app([])
+        assert exit_code == 0
+        assert mock_auth.called
+
+
 def test_run_app_interactive_date_cancelled(sample_cameras: dict[CameraNumber, Camera]) -> None:
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
         patch("hikvision_downloader.cli.app.discover_dates", return_value={}),
         patch("hikvision_downloader.cli.app.ask_recording_date", return_value=None),
     ):
@@ -409,8 +474,10 @@ def test_run_app_interactive_date_cancelled(sample_cameras: dict[CameraNumber, C
 def test_run_app_interactive_camera_cancelled(sample_cameras: dict[CameraNumber, Camera]) -> None:
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
         patch("hikvision_downloader.cli.app.discover_dates", return_value={}),
         patch("hikvision_downloader.cli.app.ask_recording_date", return_value=date(2024, 3, 15)),
         patch("hikvision_downloader.cli.app.ask_camera", return_value=None),
@@ -422,8 +489,10 @@ def test_run_app_interactive_camera_cancelled(sample_cameras: dict[CameraNumber,
 def test_run_app_interactive_stream_cancelled(sample_cameras: dict[CameraNumber, Camera]) -> None:
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
         patch("hikvision_downloader.cli.app.discover_dates", return_value={}),
         patch("hikvision_downloader.cli.app.ask_recording_date", return_value=date(2024, 3, 15)),
         patch("hikvision_downloader.cli.app.ask_camera", return_value=sample_cameras[CameraNumber(1)]),
@@ -436,13 +505,15 @@ def test_run_app_interactive_stream_cancelled(sample_cameras: dict[CameraNumber,
 def test_run_app_interactive_no_recordings(sample_cameras: dict[CameraNumber, Camera]) -> None:
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
         patch("hikvision_downloader.cli.app.discover_dates", return_value={}),
         patch("hikvision_downloader.cli.app.ask_recording_date", return_value=date(2024, 3, 15)),
         patch("hikvision_downloader.cli.app.ask_camera", return_value=sample_cameras[CameraNumber(1)]),
         patch("hikvision_downloader.cli.app.ask_stream", return_value=StreamType.MAIN),
-        patch("hikvision_downloader.cli.app.search_recordings_for_date", return_value=None),
+        patch("hikvision_downloader.cli.app.search_recordings_for_date", return_value=([], 0.5)),
     ):
         exit_code = run_app([])
         assert exit_code == 0
@@ -460,8 +531,10 @@ def test_run_app_interactive_selection_declined(sample_cameras: dict[CameraNumbe
     ]
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
         patch("hikvision_downloader.cli.app.discover_dates", return_value={}),
         patch("hikvision_downloader.cli.app.ask_recording_date", return_value=date(2024, 3, 15)),
         patch("hikvision_downloader.cli.app.ask_camera", return_value=sample_cameras[CameraNumber(1)]),
@@ -503,11 +576,13 @@ def test_run_app_cancellation_during_download(sample_cameras: dict[CameraNumber,
 
     with (
         patch("hikvision_downloader.cli.app.NVR_HOST", "192.168.1.100"),
-        patch("hikvision_downloader.cli.app.load_cameras", return_value=sample_cameras),
-        patch("hikvision_downloader.cli.app.make_session"),
+        patch("hikvision_downloader.cli.app.NVR_USERNAME", "admin"),
+        patch("hikvision_downloader.cli.app.NVR_PASSWORD", "secret"),
+        patch("hikvision_downloader.cli.app.create_authenticated_session"),
+        patch.object(CameraDiscoveryService, "get_cameras", return_value=sample_cameras),
         patch("hikvision_downloader.cli.app.get_all_recordings", return_value=mock_recordings),
         patch("hikvision_downloader.cli.app.save_recording_list", return_value=tmp_path / "recordings.csv"),
-        patch("hikvision_downloader.cli.app.download_recordings", side_effect=fake_download),
+        patch("hikvision_downloader.cli.app.download_recordings_concurrent", side_effect=fake_download),
     ):
         exit_code = run_app(
             [
@@ -521,4 +596,3 @@ def test_run_app_cancellation_during_download(sample_cameras: dict[CameraNumber,
             ]
         )
         assert exit_code == 130
-

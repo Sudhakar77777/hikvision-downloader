@@ -1,4 +1,5 @@
 import argparse
+import getpass
 import signal
 import sys
 import threading
@@ -10,21 +11,27 @@ from types import FrameType
 from xml.etree import ElementTree as ET
 
 import requests
+from pydantic import SecretStr
 
 from ..config import (
     BATCH_SIZE,
     CAMERA_CONFIG,
     DATE_DISCOVERY_TRACK_ID,
+    NVR_AUTH_TYPE,
     NVR_HOST,
+    NVR_MAX_WORKERS,
+    NVR_PASSWORD,
+    NVR_PORT,
+    NVR_USERNAME,
     OUTPUT_ROOT,
     TIMEOUT,
 )
-from ..core.cameras import load_cameras
+from ..core.auth import create_authenticated_session
+from ..core.cameras import CameraDiscoveryService, format_host_port
 from ..core.dates import discover_available_dates
-from ..core.downloads import download_recordings, format_duration
+from ..core.downloads import download_recordings_concurrent, format_duration
 from ..core.models import Camera, CameraNumber, Recording, RecordingDate, StreamType, TrackId
 from ..core.recordings import get_all_recordings, recording_total_size, save_recording_list
-from ..http_client import make_session
 from .formatters import (
     display_abort_notice,
     display_available_dates,
@@ -65,6 +72,46 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Hikvision NVR IP address or hostname (overrides HIKVISION_HOST from .env)",
     )
     parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Hikvision NVR HTTP/ISAPI port (overrides HIKVISION_PORT from .env, default: 80)",
+    )
+    parser.add_argument(
+        "-u",
+        "--username",
+        type=str,
+        default=None,
+        help="Hikvision NVR username (overrides HIKVISION_USERNAME from .env)",
+    )
+    parser.add_argument(
+        "-p",
+        "--password",
+        type=str,
+        default=None,
+        help="Hikvision NVR password (overrides HIKVISION_PASSWORD from .env)",
+    )
+    parser.add_argument(
+        "--auth-type",
+        type=str,
+        choices=["digest", "basic", "DIGEST", "BASIC"],
+        default=None,
+        help="HTTP authentication type: 'digest' (default) or 'basic'",
+    )
+    parser.add_argument(
+        "-w",
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of concurrent download workers (1-4, default: 2)",
+    )
+    parser.add_argument(
+        "--refresh-cameras",
+        action="store_true",
+        default=False,
+        help="Bypass discovery cache and force fresh camera discovery from NVR",
+    )
+    parser.add_argument(
         "--date",
         type=str,
         default=None,
@@ -79,9 +126,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["main", "sub", "MAIN", "SUB"],
         default=None,
-        help="Stream quality to download: 'main' (HD) or 'sub' (SD)",
+        help="Stream quality or track identifier (e.g. 'main', 'sub', 'third', or custom stream track)",
     )
     parser.add_argument(
         "--range",
@@ -118,14 +164,26 @@ def parse_date_spec(date_str: str) -> date:
         raise ValueError(f"Invalid date '{date_str}'. Expected format: YYYY-MM-DD (e.g. 2024-03-15)") from exc
 
 
-def parse_stream_type(stream_str: str) -> StreamType:
-    """Parse a stream type string into a StreamType enum."""
-    normalized = stream_str.strip().lower()
-    if normalized == "main":
+def parse_stream_type(stream_str: str) -> str | StreamType:
+    """Parse a stream type string into a normalized StreamType or custom track identifier."""
+    cleaned = stream_str.strip()
+    if not cleaned:
+        raise ValueError("Stream type cannot be empty.")
+    normalized = cleaned.lower()
+    if normalized in ("main", "hd", "1"):
         return StreamType.MAIN
-    if normalized == "sub":
+    if normalized in ("sub", "sd", "2"):
         return StreamType.SUB
-    raise ValueError(f"Invalid stream type '{stream_str}'. Expected 'main' or 'sub'.")
+    if normalized in ("third", "preview", "3"):
+        return StreamType.THIRD
+    if normalized.isdigit():
+        return normalized
+    if normalized.startswith("stream") and normalized[6:].isdigit():
+        return normalized
+    if normalized in ("other", "custom"):
+        return normalized
+    raise ValueError(f"Invalid stream type '{stream_str}'. Expected 'main', 'sub', 'third', track ID, or stream number.")
+
 
 
 def parse_range_spec(range_str: str | None, total: int) -> tuple[int, int]:
@@ -241,11 +299,12 @@ def search_recordings_for_date(
     session: requests.Session,
     host: str,
     camera: Camera,
-    stream: StreamType,
+    stream: str | StreamType,
     recording_date: date,
-) -> tuple[Sequence[Recording], float] | None:
+) -> tuple[Sequence[Recording], float]:
     """Search the NVR for all recordings matching the selected date and track."""
     track_id = camera.track_id(stream)
+    stream_display = str(stream).replace("streamtype.", "").capitalize()
 
     print()
     print("=" * 70)
@@ -253,31 +312,26 @@ def search_recordings_for_date(
     print("=" * 70)
     print(f"Date:      {recording_date.isoformat()}")
     print(f"Camera:    [{int(camera.number)}] {camera.name}")
-    print(f"Stream:    {stream.capitalize()}")
+    print(f"Stream:    {stream_display}")
     print(f"Track ID:  {int(track_id)}")
     print()
 
     started = time.monotonic()
 
-    try:
-        recordings = get_all_recordings(
-            session=session,
-            host=host,
-            track_id=track_id,
-            recording_date=recording_date,
-            batch_size=BATCH_SIZE,
-            timeout=TIMEOUT,
-        )
-    except (requests.RequestException, ET.ParseError, RuntimeError, ValueError) as exc:
-        print()
-        display_error(f"FILE SEARCH FAILED: {exc}")
-        return None
+    recordings = get_all_recordings(
+        session=session,
+        host=host,
+        track_id=track_id,
+        recording_date=recording_date,
+        batch_size=BATCH_SIZE,
+        timeout=TIMEOUT,
+    )
 
     duration = time.monotonic() - started
 
     if not recordings:
         print(f"No recordings found. Search completed in {format_duration(duration)}.")
-        return None
+        return [], duration
 
     total_size = recording_total_size(recordings)
 
@@ -310,19 +364,82 @@ def run_app(argv: Sequence[str] | None = None) -> int:
 
     try:
         # --------------------------------------------------------
-        # 1. Host Configuration
+        # 1. Host & Port Configuration
         # --------------------------------------------------------
         effective_host = args.host or NVR_HOST
         if not effective_host:
             display_error("NVR host is not configured. Specify --host or set HIKVISION_HOST in .env")
             return 1
 
-        display_header(effective_host)
-        cameras = load_cameras(CAMERA_CONFIG)
-        session = make_session()
+        effective_port = args.port or NVR_PORT or 80
+        effective_workers = max(1, min(args.workers or NVR_MAX_WORKERS or 2, 4))
+        host_endpoint = format_host_port(effective_host, effective_port)
 
         # --------------------------------------------------------
-        # 2. Date Selection (Headless vs Interactive)
+        # 2. Authentication Resolution & Session Creation
+        # --------------------------------------------------------
+        effective_username = args.username or NVR_USERNAME
+        effective_password = args.password or NVR_PASSWORD
+        effective_auth_type = (args.auth_type or NVR_AUTH_TYPE or "digest").lower()
+
+        if not effective_username:
+            if args.non_interactive:
+                display_error("Authentication credentials missing. Specify --username/--password or configure .env")
+                return 1
+            print()
+            print("Hikvision NVR Authentication")
+            print("=" * 40)
+            username_input = input("Enter NVR Username: ").strip()
+            password_input = getpass.getpass("Enter NVR Password: ").strip()
+            if not username_input or not password_input:
+                display_error("Username and password are required.")
+                return 1
+            effective_username = username_input
+            effective_password = password_input
+
+        elif not effective_password:
+            if args.non_interactive:
+                display_error("Password is required when username is provided.")
+                return 1
+            password_input = getpass.getpass(f"Enter NVR Password for {effective_username}: ").strip()
+            if not password_input:
+                display_error("Password is required.")
+                return 1
+            effective_password = password_input
+
+        try:
+            session = create_authenticated_session(
+                host=effective_host,
+                port=effective_port,
+                username=effective_username,
+                password=SecretStr(effective_password),
+                auth_type=effective_auth_type,
+            )
+        except (RuntimeError, ValueError) as exc:
+            display_error(f"AUTHENTICATION SETUP FAILED: {exc}")
+            return 1
+
+        display_header(effective_host, port=effective_port, username=effective_username)
+
+        # --------------------------------------------------------
+        # 3. Dynamic Camera Discovery
+        # --------------------------------------------------------
+        discovery_service = CameraDiscoveryService()
+        try:
+            cameras = discovery_service.get_cameras(
+                session=session,
+                host=effective_host,
+                port=effective_port,
+                config_file=CAMERA_CONFIG if CAMERA_CONFIG.exists() else None,
+                force_refresh=args.refresh_cameras,
+                timeout=TIMEOUT,
+            )
+        except (requests.RequestException, ET.ParseError, RuntimeError, ValueError, FileNotFoundError) as exc:
+            display_error(f"CAMERA DISCOVERY FAILED: {exc}")
+            return 1
+
+        # --------------------------------------------------------
+        # 4. Date Selection (Headless vs Interactive)
         # --------------------------------------------------------
         recording_date: date | None = None
         if args.date:
@@ -335,14 +452,14 @@ def run_app(argv: Sequence[str] | None = None) -> int:
             display_error("--date is required when running in --non-interactive mode.")
             return 1
         else:
-            months = discover_dates(session, effective_host)
+            months = discover_dates(session, host_endpoint)
             recording_date = ask_recording_date(months)
             if recording_date is None:
                 print("Cancelled.")
                 return 0
 
         # --------------------------------------------------------
-        # 3. Camera Selection (Headless vs Interactive)
+        # 5. Camera Selection (Headless vs Interactive)
         # --------------------------------------------------------
         camera: Camera | None = None
         if args.camera:
@@ -361,9 +478,9 @@ def run_app(argv: Sequence[str] | None = None) -> int:
                 return 0
 
         # --------------------------------------------------------
-        # 4. Stream Selection (Headless vs Interactive)
+        # 6. Stream Selection (Headless vs Interactive)
         # --------------------------------------------------------
-        stream: StreamType | None = None
+        stream: str | StreamType | None = None
         if args.stream:
             try:
                 stream = parse_stream_type(args.stream)
@@ -374,7 +491,7 @@ def run_app(argv: Sequence[str] | None = None) -> int:
             display_error("--stream is required when running in --non-interactive mode.")
             return 1
         else:
-            stream = ask_stream()
+            stream = ask_stream(camera=camera)
             if stream is None:
                 print("Cancelled.")
                 return 0
@@ -382,23 +499,25 @@ def run_app(argv: Sequence[str] | None = None) -> int:
         display_selection(camera, stream)
 
         # --------------------------------------------------------
-        # 5. Search Recordings
+        # 7. Search Recordings
         # --------------------------------------------------------
-        search_res = search_recordings_for_date(
-            session=session,
-            host=effective_host,
-            camera=camera,
-            stream=stream,
-            recording_date=recording_date,
-        )
+        try:
+            recordings, search_duration = search_recordings_for_date(
+                session=session,
+                host=host_endpoint,
+                camera=camera,
+                stream=stream,
+                recording_date=recording_date,
+            )
+        except (requests.RequestException, ET.ParseError, RuntimeError, ValueError) as exc:
+            display_error(f"FILE SEARCH FAILED: {exc}")
+            return 1
 
-        if search_res is None:
+        if not recordings:
             return 0
 
-        recordings, search_duration = search_res
-
         # --------------------------------------------------------
-        # 6. Save and Display Recording List
+        # 8. Save and Display Recording List
         # --------------------------------------------------------
         track_id = camera.track_id(stream)
         stream_name = camera.stream_name(stream)
@@ -421,7 +540,7 @@ def run_app(argv: Sequence[str] | None = None) -> int:
         display_recording_list(recordings)
 
         # --------------------------------------------------------
-        # 7. Range Selection (Headless vs Interactive)
+        # 9. Range Selection (Headless vs Interactive)
         # --------------------------------------------------------
         selection: tuple[int, int] | None = None
         if args.range:
@@ -454,9 +573,9 @@ def run_app(argv: Sequence[str] | None = None) -> int:
         start, count = selection
 
         # --------------------------------------------------------
-        # 8. Execute Download Batch with Signal Interruption Handling
+        # 10. Execute Concurrent Download Pool with Interruption Handling
         # --------------------------------------------------------
-        download_res = download_recordings(
+        download_res = download_recordings_concurrent(
             session=session,
             host=effective_host,
             recordings=recordings,
@@ -464,6 +583,8 @@ def run_app(argv: Sequence[str] | None = None) -> int:
             output_dir=destination_dir,
             start=start,
             count=count,
+            max_workers=effective_workers,
+            port=effective_port,
             timeout=TIMEOUT,
             progress_callback=display_download_progress,
             cancel_event=cancel_event,
@@ -485,7 +606,7 @@ def run_app(argv: Sequence[str] | None = None) -> int:
             return 1
 
         # --------------------------------------------------------
-        # 9. Summary Display
+        # 11. Summary Display
         # --------------------------------------------------------
         display_download_summary(
             camera=camera,
@@ -513,4 +634,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

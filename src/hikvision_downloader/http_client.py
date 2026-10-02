@@ -3,24 +3,17 @@ from typing import Any
 
 import requests
 
-from .config import COOKIE, MAX_RETRIES, RETRY_WAIT, USER_AGENT
+from .config import MAX_RETRIES, RETRY_WAIT, USER_AGENT
 
 
-def make_session(cookie: str | None = None, user_agent: str | None = None) -> requests.Session:
-    """Create an authenticated HTTP session using the Hikvision WebSession cookie."""
-    auth_cookie = cookie or COOKIE
-
-    if not auth_cookie:
-        raise RuntimeError("HIKVISION_COOKIE is missing from .env configuration")
-
+def make_session(user_agent: str | None = None) -> requests.Session:
+    """Create an HTTP session with default headers."""
     session = requests.Session()
     session.headers.update(
         {
-            "Cookie": auth_cookie,
             "User-Agent": user_agent or USER_AGENT,
         }
     )
-
     return session
 
 
@@ -34,7 +27,11 @@ def request_with_retry(
     verbose: bool = False,
     **kwargs: Any,
 ) -> requests.Response:
-    """Make an HTTP request with exponential/linear retries and error checking."""
+    """Make an HTTP request with exponential/linear retries and error checking.
+
+    Authentication/authorization failures (401 Unauthorized, 403 Forbidden) are never
+    retried to prevent triggering NVR security lockouts / illegal login bans.
+    """
     for attempt in range(1, max_retries + 1):
         try:
             if verbose:
@@ -42,13 +39,30 @@ def request_with_retry(
 
             response = session.request(method, url, **kwargs)
 
-            if response.status_code == 401:
-                raise RuntimeError("NVR returned 401 Unauthorized. The WebSession cookie has probably expired.")
+            # Never retry on 401 Unauthorized or 403 Forbidden: fail immediately
+            if response.status_code in (401, 403):
+                status_desc = "401 Unauthorized" if response.status_code == 401 else "403 Forbidden"
+                raise RuntimeError(
+                    f"NVR returned {status_desc}. Check username and password credentials."
+                )
 
             response.raise_for_status()
             return response
 
         except (requests.RequestException, RuntimeError) as exc:
+            # Check if this was an authentication/permission rejection (401/403)
+            # DO NOT retry authentication errors under ANY circumstances to prevent locking NVR accounts
+            is_auth_error = (
+                isinstance(exc, RuntimeError)
+                and ("401 Unauthorized" in str(exc) or "403 Forbidden" in str(exc))
+            ) or (
+                isinstance(exc, requests.HTTPError)
+                and exc.response is not None
+                and exc.response.status_code in (401, 403)
+            )
+            if is_auth_error:
+                raise
+
             if verbose:
                 print(f"  Request attempt {attempt}/{max_retries} failed: {exc}")
 

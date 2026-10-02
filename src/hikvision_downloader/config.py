@@ -13,7 +13,11 @@ CAMERA_CONFIG: Path = PROJECT_ROOT / "config" / "cameras.toml"
 config: dict[str, str | None] = dotenv_values(ENV_FILE)
 
 NVR_HOST: str | None = config.get("HIKVISION_HOST")
-COOKIE: str | None = config.get("HIKVISION_COOKIE")
+NVR_PORT: int = int(config.get("HIKVISION_PORT") or 80)
+NVR_USERNAME: str | None = config.get("HIKVISION_USERNAME")
+NVR_PASSWORD: str | None = config.get("HIKVISION_PASSWORD")
+NVR_AUTH_TYPE: str = (config.get("HIKVISION_AUTH_TYPE") or "digest").strip().lower()
+NVR_MAX_WORKERS: int = max(1, min(int(config.get("HIKVISION_MAX_WORKERS") or 2), 4))
 
 OUTPUT_ROOT: Path = PROJECT_ROOT / "output"
 

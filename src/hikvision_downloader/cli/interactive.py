@@ -28,28 +28,69 @@ def ask_camera(cameras: dict[CameraNumber, Camera]) -> Camera | None:
             print(f"Please enter a valid camera number from the list (1 to {len(cameras)}).")
 
 
-def ask_stream() -> StreamType | None:
-    """Prompt the user to select Main or Sub stream."""
+def ask_stream(camera: Camera | None = None) -> str | None:
+    """Prompt the user to select from available streams on the camera or specify a custom stream."""
+    stream_options: list[tuple[str, str, int | None]] = []
+
+    if camera and camera.tracks:
+        for s_name, s_track in camera.tracks.items():
+            label = s_name.capitalize()
+            stream_options.append((s_name, label, int(s_track)))
+    elif camera:
+        stream_options = [
+            ("main", "Main", int(camera.main_track)),
+        ]
+        if int(camera.sub_track) > 0:
+            stream_options.append(("sub", "Sub", int(camera.sub_track)))
+    else:
+        stream_options = [
+            ("main", "Main", None),
+            ("sub", "Sub", None),
+        ]
+
+    other_idx = len(stream_options) + 1
+
     print()
     print("Stream")
     print("=" * 30)
-    print("1. Main")
-    print("2. Sub")
+    for idx, (_key, label, trk) in enumerate(stream_options, start=1):
+        trk_info = f" (Track {trk})" if trk else ""
+        print(f"{idx}. {label}{trk_info}")
+    print(f"{other_idx}. Other (Custom track ID / stream)")
     print("=" * 30)
 
     while True:
-        value = input("Select stream (q to quit): ").strip().lower()
+        value = input("Select stream (q to quit): ").strip()
 
-        if value == "q":
+        if value.lower() == "q":
             return None
 
-        if value == "1":
-            return StreamType.MAIN
+        if value.isdigit():
+            choice = int(value)
+            if 1 <= choice <= len(stream_options):
+                return stream_options[choice - 1][0]
+            if choice == other_idx:
+                custom_val = input("Enter stream track ID or name (e.g. 103, third): ").strip()
+                if custom_val.lower() == "q" or not custom_val:
+                    return None
+                return custom_val
 
-        if value == "2":
-            return StreamType.SUB
+        val_lower = value.lower()
+        if val_lower in ("other", "custom"):
+            custom_val = input("Enter stream track ID or name (e.g. 103, third): ").strip()
+            if custom_val.lower() == "q" or not custom_val:
+                return None
+            return custom_val
 
-        print("Please enter 1 for Main or 2 for Sub.")
+        for key, label, _ in stream_options:
+            if val_lower in (key.lower(), label.lower()):
+                return key
+
+        if value:
+            return value
+
+        print(f"Please enter a number between 1 and {other_idx} or stream name.")
+
 
 
 def ask_recording_date(months: dict[tuple[int, int], list[RecordingDate]]) -> date | None:
@@ -128,7 +169,7 @@ def ask_download_selection(total: int) -> tuple[int, int] | None:
 
 def confirm_download(
     camera: Camera,
-    stream: StreamType,
+    stream: str | StreamType,
     recording_date: date,
     recordings: Sequence[Recording],
     start: int,
@@ -137,13 +178,14 @@ def confirm_download(
     """Confirm the selected download batch with summary details."""
     track_id = camera.track_id(stream)
     end = start + count - 1
+    stream_display = str(stream).replace("streamtype.", "").capitalize()
 
     print()
     print("=" * 70)
     print("DOWNLOAD SELECTION")
     print("=" * 70)
     print(f"Camera:      [{int(camera.number)}] {camera.name}")
-    print(f"Stream:      {stream.capitalize()} ({int(track_id)})")
+    print(f"Stream:      {stream_display} ({int(track_id)})")
     print(f"Date:        {recording_date.isoformat()}")
     print(f"Recordings:  {start}-{end}")
     print(f"Files:       {count}")

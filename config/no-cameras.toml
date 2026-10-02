@@ -1,0 +1,81 @@
+# Local camera configuration.
+#
+# This file contains installation-specific information.
+# DO NOT commit this file to a public repository.
+
+[[cameras]]
+number = 1
+name = "MainGate"
+ip_address = "192.168.1.217"
+main_track = 101
+sub_track = 102
+
+[[cameras]]
+number = 2
+name = "MainEntrance"
+ip_address = "192.168.1.210"
+main_track = 201
+sub_track = 202
+
+[[cameras]]
+number = 3
+name = "Office"
+ip_address = "192.168.1.220"
+main_track = 301
+sub_track = 302
+
+[[cameras]]
+number = 4
+name = "FirstFL"
+ip_address = "192.168.1.204"
+main_track = 401
+sub_track = 402
+
+[[cameras]]
+number = 5
+name = "SideLeft"
+ip_address = "192.168.1.216"
+main_track = 501
+sub_track = 502
+
+[[cameras]]
+number = 6
+name = "SideRight"
+ip_address = "192.168.1.214"
+main_track = 601
+sub_track = 602
+
+[[cameras]]
+number = 7
+name = "BackDoor"
+ip_address = "192.168.1.215"
+main_track = 701
+sub_track = 702
+
+[[cameras]]
+number = 8
+name = "BackYardRT"
+ip_address = "192.168.1.209"
+main_track = 801
+sub_track = 802
+
+[[cameras]]
+number = 9
+name = "TerraceDoor"
+ip_address = "192.168.1.218"
+main_track = 901
+sub_track = 902
+
+[[cameras]]
+number = 10
+name = "TerraceRTSide"
+ip_address = "192.168.1.219"
+main_track = 1001
+sub_track = 1002
+
+[[cameras]]
+number = 11
+name = "TerraceFront"
+ip_address = "192.168.1.221"
+main_track = 1101
+sub_track = 1102

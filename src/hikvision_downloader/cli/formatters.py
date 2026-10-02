@@ -1,3 +1,4 @@
+import threading
 from collections.abc import Sequence
 from datetime import date
 
@@ -13,13 +14,18 @@ from ..core.models import (
     TrackId,
 )
 
+_progress_lock = threading.Lock()
 
-def display_header(host: str | None) -> None:
+
+def display_header(host: str | None, port: int = 80, username: str | None = None) -> None:
     """Display the application header."""
+    host_display = f"{host}:{port}" if host and port != 80 else (host or "Not configured")
+    user_display = f" (user: {username})" if username else ""
+
     print()
     print("Hikvision Recording Downloader")
     print("=" * 40)
-    print(f"NVR: {host or 'Not configured'}")
+    print(f"NVR: {host_display}{user_display}")
 
 
 def display_available_dates(months: dict[tuple[int, int], list[RecordingDate]]) -> None:
@@ -51,20 +57,21 @@ def display_camera_list(cameras: dict[CameraNumber, Camera]) -> None:
     print("Cameras")
     print("=" * 60)
 
-    for number, camera in cameras.items():
+    for number, camera in sorted(cameras.items()):
         print(f"{int(number):>3}. [{int(number):>2}] {camera.name:<18} {camera.ip_address}")
 
     print("=" * 60)
 
 
-def display_selection(camera: Camera, stream: StreamType) -> None:
+def display_selection(camera: Camera, stream: str | StreamType) -> None:
     """Display the selected camera and stream parameters."""
     track_id = camera.track_id(stream)
+    stream_display = str(stream).replace("streamtype.", "").capitalize()
 
     print()
     print(f"Camera:    [{int(camera.number)}] {camera.name}")
     print(f"Camera IP: {camera.ip_address}")
-    print(f"Stream:    {stream.capitalize()}")
+    print(f"Stream:    {stream_display}")
     print(f"Track ID:  {int(track_id)}")
 
 
@@ -87,19 +94,20 @@ def display_recording_list(recordings: Sequence[Recording]) -> None:
 
 
 def display_download_progress(progress: DownloadProgress) -> None:
-    """Render a single download progress line to the terminal."""
+    """Render a single download progress line to the terminal in a thread-safe manner."""
     size_mb = float(progress.bytes_downloaded) / (1024 * 1024)
 
-    if progress.is_skipped:
-        print(f"[{progress.current_index}/{progress.total_files}] {progress.filename}  {size_mb:.2f} MB  SKIP")
-    else:
-        duration_str = format_duration(progress.elapsed_seconds)
-        print(f"[{progress.current_index}/{progress.total_files}] {progress.filename}  {size_mb:.2f} MB  {duration_str}  OK")
+    with _progress_lock:
+        if progress.is_skipped:
+            print(f"[{progress.current_index}/{progress.total_files}] {progress.filename}  {size_mb:.2f} MB  SKIP", flush=True)
+        else:
+            duration_str = format_duration(progress.elapsed_seconds)
+            print(f"[{progress.current_index}/{progress.total_files}] {progress.filename}  {size_mb:.2f} MB  {duration_str}  OK", flush=True)
 
 
 def display_download_summary(
     camera: Camera,
-    stream: StreamType,
+    stream: str | StreamType,
     recording_date: date,
     track_id: TrackId,
     selection: tuple[int, int],
@@ -110,13 +118,14 @@ def display_download_summary(
     start, count = selection
     downloaded_bytes = int(result.downloaded_bytes)
     total_download_time = result.total_duration_seconds
+    stream_display = str(stream).replace("streamtype.", "").capitalize()
 
     print()
     print("=" * 70)
     print("DOWNLOAD BATCH COMPLETE")
     print("=" * 70)
     print(f"Camera:          [{int(camera.number)}] {camera.name}")
-    print(f"Stream:          {stream.capitalize()} ({int(track_id)})")
+    print(f"Stream:          {stream_display} ({int(track_id)})")
     print(f"Date:            {recording_date.isoformat()}")
     print(f"Recordings:      {start}-{start + count - 1}")
     print(f"Downloaded:      {result.downloaded_files}")
@@ -148,4 +157,3 @@ def display_error(message: str) -> None:
     print("=" * 70)
     print(f"ERROR: {message}")
     print("=" * 70)
-

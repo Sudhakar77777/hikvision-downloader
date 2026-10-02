@@ -1,6 +1,7 @@
 import threading
 import time
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import requests
@@ -27,21 +28,25 @@ def format_duration(seconds: float) -> str:
     return f"{hours}h {minutes:02d}m {secs:02d}s"
 
 
-def build_download_url(host: str, recording: Recording, track_id: TrackId) -> str:
+def build_download_url(host: str, recording: Recording, track_id: TrackId, port: int = 80) -> str:
     """Build the ISAPI download URL in the format expected by Hikvision NVR."""
-    start_str = recording.start.replace("T", " ")
-    end_str = recording.end.replace("T", " ")
+    if recording.playback_uri and f"tracks/{track_id}" in recording.playback_uri:
+        playback_uri = recording.playback_uri
+    else:
+        start_str = recording.start.replace("T", " ")
+        end_str = recording.end.replace("T", " ")
+        playback_uri = (
+            f"rtsp://{host}"
+            f"/Streaming/tracks/{track_id}"
+            f"?starttime={start_str}"
+            f"&amp;endtime={end_str}"
+            f"&amp;name={recording.name}"
+            f"&amp;size={int(recording.size_bytes)}"
+        )
 
-    playback_uri = (
-        f"rtsp://{host}"
-        f"/Streaming/tracks/{track_id}"
-        f"?starttime={start_str}"
-        f"&amp;endtime={end_str}"
-        f"&amp;name={recording.name}"
-        f"&amp;size={int(recording.size_bytes)}"
-    )
+    host_str = host if (":" in host or port == 80) else f"{host}:{port}"
 
-    return f"http://{host}/ISAPI/ContentMgmt/download?playbackURI={playback_uri}&onlyVerification=true"
+    return f"http://{host_str}/ISAPI/ContentMgmt/download?playbackURI={playback_uri}&onlyVerification=true"
 
 
 def download_recording(
@@ -52,6 +57,7 @@ def download_recording(
     destination: Path,
     current_index: int,
     total_files: int,
+    port: int = 80,
     timeout: float = 120.0,
     progress_callback: ProgressCallback | None = None,
     cancel_event: threading.Event | None = None,
@@ -83,7 +89,7 @@ def download_recording(
                 )
             return True, 0.0, ByteCount(actual_size), True, None
 
-    url = build_download_url(host, recording, track_id)
+    url = build_download_url(host, recording, track_id, port=port)
     temp_file = destination.with_suffix(destination.suffix + ".part")
     started = time.monotonic()
 
@@ -150,11 +156,12 @@ def download_recordings(
     output_dir: Path,
     start: int,
     count: int,
+    port: int = 80,
     timeout: float = 120.0,
     progress_callback: ProgressCallback | None = None,
     cancel_event: threading.Event | None = None,
 ) -> DownloadResult:
-    """Download a slice of recordings and return aggregate statistics."""
+    """Download a slice of recordings sequentially and return aggregate statistics."""
     total_recordings = len(recordings)
     if start < 1 or start > total_recordings:
         raise ValueError(f"Start index {start} out of bounds (1..{total_recordings})")
@@ -193,6 +200,7 @@ def download_recordings(
             destination=destination,
             current_index=offset,
             total_files=total_recordings,
+            port=port,
             timeout=timeout,
             progress_callback=progress_callback,
             cancel_event=cancel_event,
@@ -223,6 +231,122 @@ def download_recordings(
         skipped_files=skipped_files,
         downloaded_bytes=ByteCount(downloaded_bytes),
         total_duration_seconds=time.monotonic() - batch_started,
+        failed_index=None,
+        error_message=None,
+    )
+
+
+def download_recordings_concurrent(
+    session: requests.Session,
+    host: str,
+    recordings: Sequence[Recording],
+    track_id: TrackId,
+    output_dir: Path,
+    start: int,
+    count: int,
+    max_workers: int = 2,
+    port: int = 80,
+    timeout: float = 120.0,
+    progress_callback: ProgressCallback | None = None,
+    cancel_event: threading.Event | None = None,
+) -> DownloadResult:
+    """Download a slice of recordings concurrently using a bounded thread pool."""
+    total_recordings = len(recordings)
+    if start < 1 or start > total_recordings:
+        raise ValueError(f"Start index {start} out of bounds (1..{total_recordings})")
+    if count < 1:
+        raise ValueError(f"Count must be >= 1, got {count}")
+    if start + count - 1 > total_recordings:
+        raise ValueError(f"Range {start}..{start + count - 1} exceeds total recordings {total_recordings}")
+
+    # Enforce strict safety clamp: 1 <= workers <= 4
+    effective_workers = max(1, min(max_workers, 4))
+
+    selected = recordings[start - 1 : start - 1 + count]
+    batch_started = time.monotonic()
+
+    downloaded_files = 0
+    skipped_files = 0
+    downloaded_bytes = 0
+    failed_index: int | None = None
+    error_message: str | None = None
+
+    lock = threading.Lock()
+    local_cancel_event = cancel_event or threading.Event()
+
+    def _worker_task(offset: int, recording: Recording) -> tuple[int, bool, float, ByteCount, bool, str | None]:
+        if local_cancel_event.is_set():
+            return offset, False, 0.0, ByteCount(0), False, "Download cancelled"
+
+        filename = f"{offset}_{recording.name}" if recording.name.endswith(".mp4") else f"{offset}_{recording.name}.mp4"
+        destination = output_dir / filename
+
+        success, duration, actual_size, is_skipped, error_msg = download_recording(
+            session=session,
+            host=host,
+            recording=recording,
+            track_id=track_id,
+            destination=destination,
+            current_index=offset,
+            total_files=total_recordings,
+            port=port,
+            timeout=timeout,
+            progress_callback=progress_callback,
+            cancel_event=local_cancel_event,
+        )
+
+        return offset, success, duration, actual_size, is_skipped, error_msg
+
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        futures = [
+            executor.submit(_worker_task, offset, recording)
+            for offset, recording in enumerate(selected, start=start)
+        ]
+
+        for future in as_completed(futures):
+            try:
+                offset, success, _duration, actual_size, is_skipped, error_msg = future.result()
+            except (requests.RequestException, OSError, RuntimeError, ValueError) as exc:
+                success = False
+                offset = start
+                actual_size = ByteCount(0)
+                is_skipped = False
+                error_msg = str(exc)
+
+            with lock:
+                if not success:
+                    if failed_index is None:
+                        failed_index = offset
+                        error_message = error_msg
+                        local_cancel_event.set()
+                else:
+                    if is_skipped:
+                        skipped_files += 1
+                    else:
+                        downloaded_files += 1
+                        downloaded_bytes += int(actual_size)
+
+    total_duration = time.monotonic() - batch_started
+
+    if failed_index is not None:
+        return DownloadResult(
+            success=False,
+            total_files=count,
+            downloaded_files=downloaded_files,
+            skipped_files=skipped_files,
+            downloaded_bytes=ByteCount(downloaded_bytes),
+            total_duration_seconds=total_duration,
+            failed_index=failed_index,
+            error_message=error_message,
+        )
+
+    return DownloadResult(
+        success=True,
+        total_files=count,
+        downloaded_files=downloaded_files,
+        skipped_files=skipped_files,
+        downloaded_bytes=ByteCount(downloaded_bytes),
+        total_duration_seconds=total_duration,
         failed_index=None,
         error_message=None,
     )
