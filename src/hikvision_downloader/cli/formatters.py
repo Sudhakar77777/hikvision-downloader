@@ -131,3 +131,21 @@ def display_download_summary(
         print(f"Average speed:   {average_mbps:.2f} Mbps")
 
     print("=" * 70)
+
+
+def display_abort_notice() -> None:
+    """Display a notification banner when execution is cancelled by user."""
+    print()
+    print("=" * 70)
+    print("[ABORTED] Operation cancelled by user (Ctrl+C).")
+    print("Cleaning up temporary download files...")
+    print("=" * 70)
+
+
+def display_error(message: str) -> None:
+    """Display a formatted error message banner."""
+    print()
+    print("=" * 70)
+    print(f"ERROR: {message}")
+    print("=" * 70)
+

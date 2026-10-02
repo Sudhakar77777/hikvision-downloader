@@ -8,39 +8,21 @@ from xml.etree import ElementTree as ET
 
 import requests
 
-from .cli.formatters import (
-    display_available_dates,
-    display_download_progress,
-    display_download_summary,
-    display_header,
-    display_recording_list,
-    display_selection,
-)
-from .cli.interactive import (
-    ask_camera,
-    ask_download_selection,
-    ask_recording_date,
-    ask_stream,
-    confirm_download,
-)
+from .cli.formatters import display_available_dates
 from .config import (
     BATCH_SIZE,
-    CAMERA_CONFIG,
     DATE_DISCOVERY_TRACK_ID,
-    NVR_HOST,
-    OUTPUT_ROOT,
     TIMEOUT,
 )
-from .core.cameras import load_cameras
 from .core.dates import discover_available_dates
-from .core.downloads import download_recordings, format_duration
+from .core.downloads import format_duration
 from .core.models import Camera, Recording, RecordingDate, StreamType
-from .core.recordings import get_all_recordings, recording_total_size, save_recording_list
-from .http_client import make_session
+from .core.recordings import get_all_recordings, recording_total_size
 
 # ============================================================
 # Application Orchestration
 # ============================================================
+
 
 
 def discover_dates(session: requests.Session, host: str) -> dict[tuple[int, int], list[RecordingDate]]:
@@ -119,136 +101,12 @@ def search_recordings_for_date(
 
 
 def main() -> None:
-    """Run the complete interactive downloader workflow."""
-    if not NVR_HOST:
-        print("ERROR: HIKVISION_HOST is not configured in .env")
-        sys.exit(1)
+    """Run the complete CLI workflow (delegates to cli.app:main)."""
+    from .cli.app import main as cli_main
 
-    display_header(NVR_HOST)
-    cameras = load_cameras(CAMERA_CONFIG)
-    session = make_session()
-
-    # --------------------------------------------------------
-    # Date availability
-    # --------------------------------------------------------
-    months = discover_dates(session, NVR_HOST)
-
-    recording_date = ask_recording_date(months)
-    if recording_date is None:
-        print("Cancelled.")
-        return
-
-    # --------------------------------------------------------
-    # Camera and stream
-    # --------------------------------------------------------
-    camera = ask_camera(cameras)
-    if camera is None:
-        print("Cancelled.")
-        return
-
-    stream = ask_stream()
-    if stream is None:
-        print("Cancelled.")
-        return
-
-    display_selection(camera, stream)
-
-    # --------------------------------------------------------
-    # Search recordings
-    # --------------------------------------------------------
-    result = search_recordings_for_date(
-        session=session,
-        host=NVR_HOST,
-        camera=camera,
-        stream=stream,
-        recording_date=recording_date,
-    )
-
-    if result is None:
-        return
-
-    recordings, search_duration = result
-
-    # --------------------------------------------------------
-    # Save and display recording list
-    # --------------------------------------------------------
-    track_id = camera.track_id(stream)
-    stream_name = camera.stream_name(stream)
-    output_dir = OUTPUT_ROOT / f"{recording_date:%Y%m%d}_{camera.archive_name}_{stream_name}"
-
-    list_file = save_recording_list(
-        recordings=recordings,
-        output_dir=output_dir,
-        camera_number=camera.number,
-        camera_name=camera.name,
-        stream_name=stream_name,
-        recording_date=recording_date,
-    )
-    print(f"Recording list saved to: {list_file}")
-
-    display_recording_list(recordings)
-
-    # --------------------------------------------------------
-    # Download selection
-    # --------------------------------------------------------
-    selection = ask_download_selection(len(recordings))
-    if selection is None:
-        print("Nothing downloaded.")
-        return
-
-    start, count = selection
-
-    if not confirm_download(
-        camera=camera,
-        stream=stream,
-        recording_date=recording_date,
-        recordings=recordings,
-        start=start,
-        count=count,
-    ):
-        print("Cancelled.")
-        return
-
-    # --------------------------------------------------------
-    # Download
-    # --------------------------------------------------------
-    download_res = download_recordings(
-        session=session,
-        host=NVR_HOST,
-        recordings=recordings,
-        track_id=track_id,
-        output_dir=output_dir,
-        start=start,
-        count=count,
-        timeout=TIMEOUT,
-        progress_callback=display_download_progress,
-    )
-
-    if not download_res.success:
-        print()
-        print("=" * 70)
-        print("DOWNLOAD STOPPED")
-        print("=" * 70)
-        print(f"Failed recording: {download_res.failed_index}")
-        if download_res.error_message:
-            print(f"Reason: {download_res.error_message}")
-        print("Fix the problem and run the script again.")
-        print("Existing complete files will be skipped.")
-        sys.exit(1)
-
-    # --------------------------------------------------------
-    # Summary
-    # --------------------------------------------------------
-    display_download_summary(
-        camera=camera,
-        stream=stream,
-        recording_date=recording_date,
-        track_id=track_id,
-        selection=selection,
-        search_duration=search_duration,
-        result=download_res,
-    )
+    cli_main()
 
 
 if __name__ == "__main__":
     main()
+

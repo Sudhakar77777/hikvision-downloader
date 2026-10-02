@@ -276,6 +276,7 @@ src/
     │   └── downloads.py
     ├── cli/
     │   ├── __init__.py
+    │   ├── app.py
     │   ├── formatters.py
     │   └── interactive.py
     ├── cameras.py
@@ -415,13 +416,37 @@ sub_track = 102
 
  ## Running
 
- Run the application with:
+ Run the application interactively with:
 
-```
+```bash
 uv run hikvision-downloader
 ```
 
- The interactive workflow then guides you through:
+ Or run in headless automation mode with flags:
+
+```bash
+# Download all recordings from Camera 1 HD stream for a specific date
+uv run hikvision-downloader --date 2026-09-15 --camera 1 --stream main --non-interactive
+
+# Download a specific range of recordings with custom destination
+uv run hikvision-downloader --date 2026-09-15 --camera 1 --stream main --range 1-10 --output-dir ./archive --non-interactive
+```
+
+ ### Command-Line Arguments
+
+ | Argument | Description |
+ |---|---|
+ | `--host <HOST>` | NVR IP address or hostname (overrides `HIKVISION_HOST` from `.env`). |
+ | `--date <YYYY-MM-DD>` | Target recording date in ISO format. |
+ | `--camera <ID/NAME>` | Camera channel number (e.g. `1`) or camera name (e.g. `FrontGate`). |
+ | `--stream <main\|sub>` | Stream quality: `main` (HD) or `sub` (SD). |
+ | `--range <RANGE>` | Recording range: `all`, `START-END` (e.g. `1-10`), or `START COUNT` (e.g. `1 10`). |
+ | `--output-dir <PATH>` | Custom output directory path. |
+ | `--non-interactive` | Run without interactive prompts (fails if required options are omitted). |
+ | `--help` | Show command documentation and exit options. |
+
+ When run interactively without flags, the workflow guides you through:
+
 
 ```
 Available dates

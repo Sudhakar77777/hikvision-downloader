@@ -23,9 +23,9 @@ Phase 2: Core Decoupling & Dataclass Contract (Task 003) [COMPLETED]
    │
 Phase 3: Testing & Fixture-Based Mocking Suite (Task 004) [COMPLETED]
    │
-Phase 4: Headless CLI Engine & Entry Point (Task 005) [CURRENT]
+Phase 4: Headless CLI Engine & Entry Point (Task 005) [COMPLETED]
    │
-Phase 5: NVR Authentication, ISAPI Auto-Discovery & Concurrent Engine (Task 006)
+Phase 5: NVR Authentication, ISAPI Auto-Discovery & Concurrent Engine (Task 006) [CURRENT]
    │
 Phase 6: PySide6 Native Desktop GUI & Secure OS Credential Store (Task 007)
    │
@@ -72,12 +72,13 @@ Phase 7: Packaging, CI/CD, & Public Release (Task 008)
 
 ### Phase 4: Headless CLI Engine & Console Entry Point
 - **Task ID:** `005-cli-engine`
-- **Status:** Planned
+- **Status:** **Completed**
 - **Deliverables:**
   - Implement structured CLI argument parser (via `argparse` or `click`) supporting both interactive prompts and headless automated batch mode.
   - Command-line flags: `--host`, `--date`, `--camera`, `--stream`, `--range`, `--output-dir`, `--non-interactive`, `--verbose`.
   - Rich terminal formatting with clean tabular output, elapsed time, and download speed indicators.
   - Define `hikvision-downloader` entry point in `[project.scripts]` inside `pyproject.toml`.
+
 
 ---
 
