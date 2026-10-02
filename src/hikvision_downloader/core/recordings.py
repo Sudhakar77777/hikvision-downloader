@@ -122,18 +122,24 @@ def search_recordings(
 
     url = f"http://{host}/ISAPI/ContentMgmt/search"
 
-    response = request_with_retry(
-        session,
-        "POST",
-        url,
-        data=build_search_xml(track_id, start_time, end_time, position, batch_size=batch_size).encode("utf-8"),
-        headers={
-            "Content-Type": "application/xml",
-        },
-        timeout=timeout,
-    )
+    try:
+        response = request_with_retry(
+            session,
+            "POST",
+            url,
+            data=build_search_xml(track_id, start_time, end_time, position, batch_size=batch_size).encode("utf-8"),
+            headers={
+                "Content-Type": "application/xml",
+            },
+            timeout=timeout,
+        )
+        return parse_search_response(response.text)
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 400:
+            # NVR returns HTTP 400 Bad Request if the track ID is not a configured recording track
+            return []
+        raise
 
-    return parse_search_response(response.text)
 
 
 def get_all_recordings(

@@ -96,11 +96,15 @@ def test_download_recording_chunk_streaming(tmp_path: Path, mocker: MockerFixtur
     assert destination.exists()
     assert destination.read_bytes() == b"A" * 1024 + b"B" * 1024
 
-    # Verify progress event
-    assert len(progress_events) == 1
+    # Verify progress events (initial 0-byte start and final completion)
+    assert len(progress_events) >= 2
     assert progress_events[0].current_index == 1
-    assert progress_events[0].bytes_downloaded == ByteCount(2048)
-    assert progress_events[0].is_skipped is False
+    assert progress_events[0].bytes_downloaded == ByteCount(0)
+    assert progress_events[0].is_completed is False
+    assert progress_events[-1].current_index == 1
+    assert progress_events[-1].bytes_downloaded == ByteCount(2048)
+    assert progress_events[-1].is_completed is True
+    assert progress_events[-1].is_skipped is False
 
 
 def test_download_recording_skipped_if_exists(tmp_path: Path, mocker: MockerFixture) -> None:

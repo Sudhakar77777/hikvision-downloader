@@ -9,6 +9,7 @@ from .app import (
     setup_signal_handler,
 )
 from .formatters import (
+    MultiProgressDisplay,
     display_abort_notice,
     display_available_dates,
     display_camera_list,
@@ -18,6 +19,9 @@ from .formatters import (
     display_header,
     display_recording_list,
     display_selection,
+    format_time_span,
+    render_progress_bar,
+    reset_progress_display,
 )
 from .interactive import (
     ask_camera,
@@ -28,6 +32,7 @@ from .interactive import (
 )
 
 __all__ = [
+    "MultiProgressDisplay",
     "ask_camera",
     "ask_download_selection",
     "ask_recording_date",
@@ -43,10 +48,13 @@ __all__ = [
     "display_header",
     "display_recording_list",
     "display_selection",
+    "format_time_span",
     "main",
     "parse_date_spec",
     "parse_range_spec",
     "parse_stream_type",
+    "render_progress_bar",
+    "reset_progress_display",
     "resolve_camera",
     "run_app",
     "setup_signal_handler",

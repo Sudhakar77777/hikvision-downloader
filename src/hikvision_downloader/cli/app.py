@@ -301,20 +301,22 @@ def search_recordings_for_date(
     camera: Camera,
     stream: str | StreamType,
     recording_date: date,
+    quiet: bool = False,
 ) -> tuple[Sequence[Recording], float]:
     """Search the NVR for all recordings matching the selected date and track."""
     track_id = camera.track_id(stream)
     stream_display = str(stream).replace("streamtype.", "").capitalize()
 
-    print()
-    print("=" * 70)
-    print("SEARCHING RECORDINGS")
-    print("=" * 70)
-    print(f"Date:      {recording_date.isoformat()}")
-    print(f"Camera:    [{int(camera.number)}] {camera.name}")
-    print(f"Stream:    {stream_display}")
-    print(f"Track ID:  {int(track_id)}")
-    print()
+    if not quiet:
+        print()
+        print("=" * 70)
+        print("SEARCHING RECORDINGS")
+        print("=" * 70)
+        print(f"Date:      {recording_date.isoformat()}")
+        print(f"Camera:    [{int(camera.number)}] {camera.name}")
+        print(f"Stream:    {stream_display}")
+        print(f"Track ID:  {int(track_id)}")
+        print()
 
     started = time.monotonic()
 
@@ -330,15 +332,18 @@ def search_recordings_for_date(
     duration = time.monotonic() - started
 
     if not recordings:
-        print(f"No recordings found. Search completed in {format_duration(duration)}.")
+        if not quiet:
+            print(f"No recordings found. Search completed in {format_duration(duration)}.")
         return [], duration
 
     total_size = recording_total_size(recordings)
 
-    print(f"Found {len(recordings)} recordings in {format_duration(duration)}.")
-    print(f"Total reported size: {int(total_size) / (1024 * 1024 * 1024):.2f} GB")
+    if not quiet:
+        print(f"Found {len(recordings)} recordings in {format_duration(duration)}.")
+        print(f"Total reported size: {int(total_size) / (1024 * 1024 * 1024):.2f} GB")
 
     return recordings, duration
+
 
 
 def setup_signal_handler(cancel_event: threading.Event) -> None:
@@ -496,11 +501,20 @@ def run_app(argv: Sequence[str] | None = None) -> int:
                 print("Cancelled.")
                 return 0
 
-        display_selection(camera, stream)
+        if not args.non_interactive:
+            try:
+                display_selection(camera, stream)
+            except ValueError as exc:
+                display_error(str(exc))
+                return 1
 
         # --------------------------------------------------------
         # 7. Search Recordings
         # --------------------------------------------------------
+        stream_display = str(stream).replace("streamtype.", "").capitalize()
+        if args.non_interactive:
+            print(f"Searching recordings for {recording_date.isoformat()} [{int(camera.number)}] {camera.name} ({stream_display})...")
+
         try:
             recordings, search_duration = search_recordings_for_date(
                 session=session,
@@ -508,12 +522,15 @@ def run_app(argv: Sequence[str] | None = None) -> int:
                 camera=camera,
                 stream=stream,
                 recording_date=recording_date,
+                quiet=args.non_interactive,
             )
         except (requests.RequestException, ET.ParseError, RuntimeError, ValueError) as exc:
             display_error(f"FILE SEARCH FAILED: {exc}")
             return 1
 
         if not recordings:
+            if args.non_interactive:
+                print(f"No recordings found for {recording_date.isoformat()} ({format_duration(search_duration)}).")
             return 0
 
         # --------------------------------------------------------
@@ -535,9 +552,16 @@ def run_app(argv: Sequence[str] | None = None) -> int:
             stream_name=stream_name,
             recording_date=recording_date,
         )
-        print(f"Recording list saved to: {list_file}")
+        total_size = recording_total_size(recordings)
+        total_gb = int(total_size) / (1024 * 1024 * 1024)
 
-        display_recording_list(recordings)
+        if args.non_interactive:
+            print(f"Found {len(recordings)} recordings ({total_gb:.2f} GB) in {format_duration(search_duration)}.")
+            print(f"Recording list saved to: {list_file}\n")
+        else:
+            print(f"Recording list saved to: {list_file}")
+            display_recording_list(recordings)
+
 
         # --------------------------------------------------------
         # 9. Range Selection (Headless vs Interactive)
@@ -616,6 +640,8 @@ def run_app(argv: Sequence[str] | None = None) -> int:
             selection=selection,
             search_duration=search_duration,
             result=download_res,
+            recordings=recordings,
+            output_dir=destination_dir,
         )
         return 0
 
@@ -624,6 +650,10 @@ def run_app(argv: Sequence[str] | None = None) -> int:
             cancel_event.set()
             display_abort_notice()
         return 130
+    except (RuntimeError, ValueError, OSError, requests.RequestException) as exc:
+        display_error(f"EXECUTION ERROR: {exc}")
+        return 1
+
 
 
 def main() -> None:
@@ -634,3 +664,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

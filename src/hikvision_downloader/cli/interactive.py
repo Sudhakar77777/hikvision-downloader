@@ -29,7 +29,7 @@ def ask_camera(cameras: dict[CameraNumber, Camera]) -> Camera | None:
 
 
 def ask_stream(camera: Camera | None = None) -> str | None:
-    """Prompt the user to select from available streams on the camera or specify a custom stream."""
+    """Prompt the user to select from available streams on the camera with default selection."""
     stream_options: list[tuple[str, str, int | None]] = []
 
     if camera and camera.tracks:
@@ -48,7 +48,8 @@ def ask_stream(camera: Camera | None = None) -> str | None:
             ("sub", "Sub", None),
         ]
 
-    other_idx = len(stream_options) + 1
+    default_stream_key = stream_options[0][0]
+    default_stream_label = stream_options[0][1]
 
     print()
     print("Stream")
@@ -56,11 +57,13 @@ def ask_stream(camera: Camera | None = None) -> str | None:
     for idx, (_key, label, trk) in enumerate(stream_options, start=1):
         trk_info = f" (Track {trk})" if trk else ""
         print(f"{idx}. {label}{trk_info}")
-    print(f"{other_idx}. Other (Custom track ID / stream)")
     print("=" * 30)
 
     while True:
-        value = input("Select stream (q to quit): ").strip()
+        value = input(f"Select stream [{default_stream_label}] (q to quit): ").strip()
+
+        if not value:
+            return default_stream_key
 
         if value.lower() == "q":
             return None
@@ -69,27 +72,15 @@ def ask_stream(camera: Camera | None = None) -> str | None:
             choice = int(value)
             if 1 <= choice <= len(stream_options):
                 return stream_options[choice - 1][0]
-            if choice == other_idx:
-                custom_val = input("Enter stream track ID or name (e.g. 103, third): ").strip()
-                if custom_val.lower() == "q" or not custom_val:
-                    return None
-                return custom_val
 
         val_lower = value.lower()
-        if val_lower in ("other", "custom"):
-            custom_val = input("Enter stream track ID or name (e.g. 103, third): ").strip()
-            if custom_val.lower() == "q" or not custom_val:
-                return None
-            return custom_val
-
         for key, label, _ in stream_options:
             if val_lower in (key.lower(), label.lower()):
                 return key
 
-        if value:
-            return value
+        print(f"Please enter a number between 1 and {len(stream_options)} or stream name.")
 
-        print(f"Please enter a number between 1 and {other_idx} or stream name.")
+
 
 
 

@@ -1,6 +1,8 @@
+import sys
 import threading
 from collections.abc import Sequence
 from datetime import date
+from pathlib import Path
 
 from ..core.downloads import format_duration
 from ..core.models import (
@@ -93,16 +95,141 @@ def display_recording_list(recordings: Sequence[Recording]) -> None:
     print()
 
 
-def display_download_progress(progress: DownloadProgress) -> None:
-    """Render a single download progress line to the terminal in a thread-safe manner."""
-    size_mb = float(progress.bytes_downloaded) / (1024 * 1024)
+def format_time_span(start: str | None, end: str | None) -> str:
+    """Format start and end ISO timestamps into a compact range string '(HH:MM:SS - HH:MM:SS)'."""
+    if not start or not end:
+        return ""
 
-    with _progress_lock:
-        if progress.is_skipped:
-            print(f"[{progress.current_index}/{progress.total_files}] {progress.filename}  {size_mb:.2f} MB  SKIP", flush=True)
-        else:
-            duration_str = format_duration(progress.elapsed_seconds)
-            print(f"[{progress.current_index}/{progress.total_files}] {progress.filename}  {size_mb:.2f} MB  {duration_str}  OK", flush=True)
+    s_clean = start.rstrip("Z").replace("T", " ").strip()
+    e_clean = end.rstrip("Z").replace("T", " ").strip()
+
+    s_time = s_clean.split(" ")[-1][:8]
+    e_time = e_clean.split(" ")[-1][:8]
+
+    if not s_time or not e_time:
+        return ""
+
+    return f"({s_time} - {e_time})"
+
+
+def render_progress_bar(pct: float, length: int = 12) -> str:
+    """Render a visual ASCII progress bar [██████░░░░]."""
+    clamped = min(1.0, max(0.0, pct))
+    filled = int(length * clamped)
+    return f"[{'█' * filled}{'░' * (length - filled)}]"
+
+
+class MultiProgressDisplay:
+    """Thread-safe terminal progress manager supporting concurrent multi-line download streams."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active_lines: dict[int, str] = {}
+        self._rendered_count = 0
+
+    def update(self, progress: DownloadProgress) -> None:
+        """Process incoming progress update and render to terminal."""
+        size_mb = float(progress.bytes_downloaded) / (1024 * 1024)
+        time_span = format_time_span(progress.start_time, progress.end_time)
+        time_str = f"  {time_span}" if time_span else ""
+        is_tty = sys.stdout.isatty()
+
+        with self._lock:
+            idx = progress.current_index
+
+            if progress.is_skipped:
+                if idx in self._active_lines:
+                    del self._active_lines[idx]
+
+                line = f"[{progress.current_index}/{progress.total_files}] {progress.filename}{time_str}  {size_mb:.2f} MB  SKIP"
+                self._finalize_line(line, is_tty)
+
+            elif progress.is_completed:
+                if idx in self._active_lines:
+                    del self._active_lines[idx]
+
+                duration_str = format_duration(progress.elapsed_seconds)
+                line = f"[{progress.current_index}/{progress.total_files}] {progress.filename}{time_str}  {size_mb:.2f} MB  {duration_str}  OK"
+                self._finalize_line(line, is_tty)
+
+            else:
+                # Active in-flight transfer update
+                total_mb = float(progress.file_size_bytes) / (1024 * 1024) if progress.file_size_bytes > 0 else size_mb
+                pct = (float(progress.bytes_downloaded) / float(progress.file_size_bytes)) if progress.file_size_bytes > 0 else 0.0
+                pct_str = f"{pct * 100:>5.1f}%"
+                bar = render_progress_bar(pct, length=12)
+                speed_str = f"{float(progress.speed_mbps):>5.1f} Mbps" if float(progress.speed_mbps) > 0 else "-- Mbps"
+
+                # ETA calculation
+                if float(progress.speed_mbps) > 0 and progress.file_size_bytes > progress.bytes_downloaded:
+                    rem_bytes = int(progress.file_size_bytes) - int(progress.bytes_downloaded)
+                    speed_bytes_sec = float(progress.speed_mbps) * 1_000_000.0 / 8.0
+                    eta_sec = rem_bytes / speed_bytes_sec if speed_bytes_sec > 0 else 0
+                    eta_str = f"ETA: {format_duration(eta_sec)}"
+                else:
+                    eta_str = "ETA: --"
+
+                line = f"[{progress.current_index}/{progress.total_files}] {progress.filename}{time_str}  {bar} {pct_str}  {size_mb:>6.2f}/{total_mb:>6.2f} MB  {speed_str}  {eta_str}"
+                self._active_lines[idx] = line
+
+                if is_tty:
+                    self._render_active_lines()
+                else:
+                    # If non-TTY and just starting (0 bytes), print starting notification so log is not silent
+                    if int(progress.bytes_downloaded) == 0:
+                        print(f"[{progress.current_index}/{progress.total_files}] Downloading {progress.filename}{time_str} ({total_mb:.2f} MB)...", flush=True)
+
+    def _finalize_line(self, line: str, is_tty: bool) -> None:
+        """Print a completed/skipped permanent line, redrawing any remaining active lines below it."""
+        if not is_tty:
+            print(line, flush=True)
+            return
+
+        # Move cursor up to the top of previously rendered active block and clear downward
+        if self._rendered_count > 0:
+            sys.stdout.write(f"\033[{self._rendered_count}A\r\033[J")
+
+        # Print the finalized line permanently with newline
+        sys.stdout.write(f"{line}\033[K\n")
+
+        # Redraw remaining active lines below this completed line
+        self._rendered_count = 0
+        if self._active_lines:
+            for active_idx in sorted(self._active_lines.keys()):
+                sys.stdout.write(f"{self._active_lines[active_idx]}\033[K\n")
+            self._rendered_count = len(self._active_lines)
+
+        sys.stdout.flush()
+
+    def _render_active_lines(self) -> None:
+        """Redraw all current active in-flight lines in terminal in sorted order."""
+        if self._rendered_count > 0:
+            sys.stdout.write(f"\033[{self._rendered_count}A\r")
+
+        for active_idx in sorted(self._active_lines.keys()):
+            sys.stdout.write(f"{self._active_lines[active_idx]}\033[K\n")
+
+        self._rendered_count = len(self._active_lines)
+        sys.stdout.flush()
+
+    def reset(self) -> None:
+        """Reset internal active tracker state."""
+        with self._lock:
+            self._active_lines.clear()
+            self._rendered_count = 0
+
+
+_progress_display = MultiProgressDisplay()
+
+
+def reset_progress_display() -> None:
+    """Reset terminal progress display state."""
+    _progress_display.reset()
+
+
+def display_download_progress(progress: DownloadProgress) -> None:
+    """Render download progress to the terminal with in-place multi-line concurrent updates."""
+    _progress_display.update(progress)
 
 
 def display_download_summary(
@@ -113,6 +240,8 @@ def display_download_summary(
     selection: tuple[int, int],
     search_duration: float,
     result: DownloadResult,
+    recordings: Sequence[Recording] | None = None,
+    output_dir: Path | None = None,
 ) -> None:
     """Display final batch transfer statistics and averages."""
     start, count = selection
@@ -127,10 +256,18 @@ def display_download_summary(
     print(f"Camera:          [{int(camera.number)}] {camera.name}")
     print(f"Stream:          {stream_display} ({int(track_id)})")
     print(f"Date:            {recording_date.isoformat()}")
+    if recordings and 1 <= start <= len(recordings):
+        first_rec = recordings[start - 1]
+        last_rec = recordings[min(start + count - 1, len(recordings)) - 1]
+        start_ts = first_rec.start[:19].replace("T", " ")
+        end_ts = last_rec.end[:19].replace("T", " ")
+        print(f"Time span:       {start_ts} -> {end_ts}")
     print(f"Recordings:      {start}-{start + count - 1}")
     print(f"Downloaded:      {result.downloaded_files}")
     print(f"Skipped:         {result.skipped_files}")
     print(f"Files size:      {downloaded_bytes / (1024 * 1024 * 1024):.2f} GB")
+    if output_dir is not None:
+        print(f"Output folder:   {output_dir}")
     print(f"Search time:     {format_duration(search_duration)}")
     print(f"Download time:   {format_duration(total_download_time)}")
     print(f"Total elapsed:   {format_duration(result.total_duration_seconds)}")

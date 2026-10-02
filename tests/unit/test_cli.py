@@ -15,14 +15,23 @@ from hikvision_downloader.cli.app import (
     run_app,
     setup_signal_handler,
 )
-from hikvision_downloader.cli.formatters import display_abort_notice, display_error
+from hikvision_downloader.cli.formatters import (
+    display_abort_notice,
+    display_download_progress,
+    display_download_summary,
+    display_error,
+    format_time_span,
+    render_progress_bar,
+)
 from hikvision_downloader.core.cameras import CameraDiscoveryService
 from hikvision_downloader.core.models import (
     ByteCount,
     Camera,
     CameraNumber,
+    DownloadProgress,
     DownloadResult,
     ISODatetimeStr,
+    MegabitsPerSecond,
     Recording,
     StreamType,
     TrackId,
@@ -596,3 +605,166 @@ def test_run_app_cancellation_during_download(sample_cameras: dict[CameraNumber,
             ]
         )
         assert exit_code == 130
+
+
+# ============================================================
+# Formatter Tests (Timestamps & Progress)
+# ============================================================
+
+
+def test_format_time_span() -> None:
+    # Valid ISO timestamps
+    assert format_time_span("2026-09-14T23:58:29Z", "2026-09-15T00:00:40Z") == "(23:58:29 - 00:00:40)"
+    assert format_time_span("2026-09-15T00:00:40", "2026-09-15T00:15:40") == "(00:00:40 - 00:15:40)"
+
+    # None or empty
+    assert format_time_span(None, None) == ""
+    assert format_time_span("2026-09-15T00:00:40Z", None) == ""
+    assert format_time_span("", "2026-09-15T00:00:40Z") == ""
+
+
+def test_render_progress_bar() -> None:
+    assert render_progress_bar(0.0, length=10) == "[░░░░░░░░░░]"
+    assert render_progress_bar(0.5, length=10) == "[█████░░░░░]"
+    assert render_progress_bar(1.0, length=10) == "[██████████]"
+    assert render_progress_bar(-0.5, length=10) == "[░░░░░░░░░░]"
+    assert render_progress_bar(1.5, length=10) == "[██████████]"
+
+
+def test_display_download_progress_with_time(capsys: pytest.CaptureFixture[str]) -> None:
+    prog = DownloadProgress(
+        current_index=1,
+        total_files=5,
+        filename="1_test.mp4",
+        bytes_downloaded=ByteCount(10_485_760),
+        file_size_bytes=ByteCount(10_485_760),
+        speed_mbps=MegabitsPerSecond(15.0),
+        elapsed_seconds=2.5,
+        is_skipped=False,
+        is_completed=True,
+        start_time="2026-09-15T10:00:00Z",
+        end_time="2026-09-15T10:15:00Z",
+    )
+    display_download_progress(prog)
+    captured = capsys.readouterr().out
+    assert "[1/5] 1_test.mp4  (10:00:00 - 10:15:00)  10.00 MB  2.5s  OK" in captured
+
+
+def test_display_download_progress_in_flight_non_tty(capsys: pytest.CaptureFixture[str]) -> None:
+    prog = DownloadProgress(
+        current_index=2,
+        total_files=5,
+        filename="2_test.mp4",
+        bytes_downloaded=ByteCount(0),
+        file_size_bytes=ByteCount(100_000_000),
+        speed_mbps=MegabitsPerSecond(0.0),
+        elapsed_seconds=0.0,
+        is_skipped=False,
+        is_completed=False,
+        start_time="2026-09-15T10:15:00Z",
+        end_time="2026-09-15T10:30:00Z",
+    )
+    display_download_progress(prog)
+    captured = capsys.readouterr().out
+    assert "[2/5] Downloading 2_test.mp4  (10:15:00 - 10:30:00) (95.37 MB)..." in captured
+
+
+def test_display_download_summary_with_time_span(sample_cameras: dict[CameraNumber, Camera], capsys: pytest.CaptureFixture[str]) -> None:
+    camera = sample_cameras[CameraNumber(1)]
+    recs = [
+        Recording(
+            start=ISODatetimeStr("2026-09-15T00:00:00Z"),
+            end=ISODatetimeStr("2026-09-15T00:15:00Z"),
+            name="rec1.mp4",
+            size_bytes=ByteCount(10_000_000),
+            playback_uri="rtsp://192.168.1.100/1",
+        ),
+        Recording(
+            start=ISODatetimeStr("2026-09-15T00:15:00Z"),
+            end=ISODatetimeStr("2026-09-15T00:30:00Z"),
+            name="rec2.mp4",
+            size_bytes=ByteCount(10_000_000),
+            playback_uri="rtsp://192.168.1.100/2",
+        ),
+    ]
+    res = DownloadResult(
+        success=True,
+        total_files=2,
+        downloaded_files=2,
+        skipped_files=0,
+        downloaded_bytes=ByteCount(20_000_000),
+        total_duration_seconds=5.0,
+    )
+    display_download_summary(
+        camera=camera,
+        stream=StreamType.MAIN,
+        recording_date=date(2026, 9, 15),
+        track_id=TrackId(101),
+        selection=(1, 2),
+        search_duration=0.2,
+        result=res,
+        recordings=recs,
+        output_dir=Path("/path/to/output"),
+    )
+    captured = capsys.readouterr().out
+    assert "Time span:       2026-09-15 00:00:00 -> 2026-09-15 00:30:00" in captured
+    assert "Recordings:      1-2" in captured
+    assert "Output folder:   /path/to/output" in captured
+
+
+def test_multi_progress_display_tty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import sys
+
+    from hikvision_downloader.cli.formatters import MultiProgressDisplay
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    display = MultiProgressDisplay()
+
+    prog1 = DownloadProgress(
+        current_index=1,
+        total_files=2,
+        filename="1_ch01.mp4",
+        bytes_downloaded=ByteCount(500),
+        file_size_bytes=ByteCount(1000),
+        speed_mbps=MegabitsPerSecond(10.0),
+        elapsed_seconds=1.0,
+        is_skipped=False,
+        is_completed=False,
+    )
+    prog2 = DownloadProgress(
+        current_index=2,
+        total_files=2,
+        filename="2_ch01.mp4",
+        bytes_downloaded=ByteCount(200),
+        file_size_bytes=ByteCount(1000),
+        speed_mbps=MegabitsPerSecond(5.0),
+        elapsed_seconds=1.0,
+        is_skipped=False,
+        is_completed=False,
+    )
+
+    display.update(prog1)
+    display.update(prog2)
+    captured = capsys.readouterr().out
+    assert "[1/2] 1_ch01.mp4" in captured
+    assert "[2/2] 2_ch01.mp4" in captured
+
+    # Finalize task 1
+    prog1_done = DownloadProgress(
+        current_index=1,
+        total_files=2,
+        filename="1_ch01.mp4",
+        bytes_downloaded=ByteCount(1000),
+        file_size_bytes=ByteCount(1000),
+        speed_mbps=MegabitsPerSecond(10.0),
+        elapsed_seconds=2.0,
+        is_skipped=False,
+        is_completed=True,
+    )
+    display.update(prog1_done)
+    captured_done = capsys.readouterr().out
+    assert "[1/2] 1_ch01.mp4" in captured_done
+    assert "OK" in captured_done
+
+    display.reset()
+

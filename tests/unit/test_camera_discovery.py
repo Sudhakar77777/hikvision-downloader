@@ -202,11 +202,14 @@ def test_parse_tracks_xml_empty() -> None:
 def test_discover_cameras_isapi_input_proxy_success(mocker: MockerFixture) -> None:
     def fake_request(_session: object, _method: str, url: str, **_kwargs: object) -> MagicMock:
         resp = MagicMock()
-        if "InputProxy/channels/status" in url:
+        if "record/tracks" in url:
+            resp.text = SAMPLE_TRACKS_XML
+        elif "InputProxy/channels/status" in url:
             resp.text = SAMPLE_INPUT_PROXY_STATUS_XML
         elif "InputProxy/channels" in url:
             resp.text = SAMPLE_INPUT_PROXY_CHANNELS_XML
         return resp
+
 
     mocker.patch("hikvision_downloader.core.cameras.request_with_retry", side_effect=fake_request)
 

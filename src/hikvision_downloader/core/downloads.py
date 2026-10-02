@@ -85,13 +85,36 @@ def download_recording(
                         speed_mbps=MegabitsPerSecond(0.0),
                         elapsed_seconds=0.0,
                         is_skipped=True,
+                        is_completed=True,
+                        start_time=str(recording.start),
+                        end_time=str(recording.end),
                     )
                 )
             return True, 0.0, ByteCount(actual_size), True, None
 
+    target_bytes = int(recording.size_bytes)
+    if progress_callback is not None:
+        progress_callback(
+            DownloadProgress(
+                current_index=current_index,
+                total_files=total_files,
+                filename=destination.name,
+                bytes_downloaded=ByteCount(0),
+                file_size_bytes=ByteCount(target_bytes),
+                speed_mbps=MegabitsPerSecond(0.0),
+                elapsed_seconds=0.0,
+                is_skipped=False,
+                is_completed=False,
+                start_time=str(recording.start),
+                end_time=str(recording.end),
+            )
+        )
+
     url = build_download_url(host, recording, track_id, port=port)
     temp_file = destination.with_suffix(destination.suffix + ".part")
     started = time.monotonic()
+    last_emit_time = started
+    downloaded_bytes = 0
 
     try:
         response = request_with_retry(
@@ -108,12 +131,33 @@ def download_recording(
         )
 
         with response, open(temp_file, "wb") as file:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
+            for chunk in response.iter_content(chunk_size=256 * 1024):
                 if cancel_event is not None and cancel_event.is_set():
                     temp_file.unlink(missing_ok=True)
                     return False, time.monotonic() - started, ByteCount(0), False, "Download cancelled"
                 if chunk:
                     file.write(chunk)
+                    downloaded_bytes += len(chunk)
+                    now = time.monotonic()
+                    if progress_callback is not None and (now - last_emit_time >= 0.25):
+                        elapsed = now - started
+                        speed_mbps = (downloaded_bytes * 8.0 / elapsed / 1_000_000.0) if elapsed > 0 else 0.0
+                        progress_callback(
+                            DownloadProgress(
+                                current_index=current_index,
+                                total_files=total_files,
+                                filename=destination.name,
+                                bytes_downloaded=ByteCount(downloaded_bytes),
+                                file_size_bytes=ByteCount(target_bytes or downloaded_bytes),
+                                speed_mbps=MegabitsPerSecond(speed_mbps),
+                                elapsed_seconds=elapsed,
+                                is_skipped=False,
+                                is_completed=False,
+                                start_time=str(recording.start),
+                                end_time=str(recording.end),
+                            )
+                        )
+                        last_emit_time = now
 
         actual_size = temp_file.stat().st_size
         duration = time.monotonic() - started
@@ -137,6 +181,9 @@ def download_recording(
                     speed_mbps=MegabitsPerSecond(speed_mbps),
                     elapsed_seconds=duration,
                     is_skipped=False,
+                    is_completed=True,
+                    start_time=str(recording.start),
+                    end_time=str(recording.end),
                 )
             )
 
@@ -176,7 +223,9 @@ def download_recordings(
     skipped_files = 0
     downloaded_bytes = 0
 
-    for offset, recording in enumerate(selected, start=start):
+    for batch_idx, offset in enumerate(range(start, start + count), start=1):
+        recording = selected[batch_idx - 1]
+
         if cancel_event is not None and cancel_event.is_set():
             return DownloadResult(
                 success=False,
@@ -198,8 +247,8 @@ def download_recordings(
             recording=recording,
             track_id=track_id,
             destination=destination,
-            current_index=offset,
-            total_files=total_recordings,
+            current_index=batch_idx,
+            total_files=count,
             port=port,
             timeout=timeout,
             progress_callback=progress_callback,
@@ -274,7 +323,7 @@ def download_recordings_concurrent(
     lock = threading.Lock()
     local_cancel_event = cancel_event or threading.Event()
 
-    def _worker_task(offset: int, recording: Recording) -> tuple[int, bool, float, ByteCount, bool, str | None]:
+    def _worker_task(offset: int, batch_idx: int, recording: Recording) -> tuple[int, bool, float, ByteCount, bool, str | None]:
         if local_cancel_event.is_set():
             return offset, False, 0.0, ByteCount(0), False, "Download cancelled"
 
@@ -287,8 +336,8 @@ def download_recordings_concurrent(
             recording=recording,
             track_id=track_id,
             destination=destination,
-            current_index=offset,
-            total_files=total_recordings,
+            current_index=batch_idx,
+            total_files=count,
             port=port,
             timeout=timeout,
             progress_callback=progress_callback,
@@ -299,9 +348,13 @@ def download_recordings_concurrent(
 
     with ThreadPoolExecutor(max_workers=effective_workers) as executor:
         futures = [
-            executor.submit(_worker_task, offset, recording)
-            for offset, recording in enumerate(selected, start=start)
+            executor.submit(_worker_task, offset, batch_idx, recording)
+            for batch_idx, (offset, recording) in enumerate(
+                [(start + i, rec) for i, rec in enumerate(selected)],
+                start=1,
+            )
         ]
+
 
         for future in as_completed(futures):
             try:

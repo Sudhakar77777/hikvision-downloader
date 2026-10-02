@@ -189,9 +189,13 @@ def test_download_progress_valid() -> None:
         speed_mbps=MegabitsPerSecond(12.5),
         elapsed_seconds=1.2,
         is_skipped=False,
+        start_time="2026-09-14T23:58:29Z",
+        end_time="2026-09-15T00:00:40Z",
     )
     assert prog.current_index == 1
     assert prog.is_skipped is False
+    assert prog.start_time == "2026-09-14T23:58:29Z"
+    assert prog.end_time == "2026-09-15T00:00:40Z"
 
 
 def test_download_progress_invalid() -> None:

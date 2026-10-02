@@ -50,18 +50,18 @@ def request_with_retry(
             return response
 
         except (requests.RequestException, RuntimeError) as exc:
-            # Check if this was an authentication/permission rejection (401/403)
-            # DO NOT retry authentication errors under ANY circumstances to prevent locking NVR accounts
-            is_auth_error = (
+            # Do not retry client errors (400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found)
+            is_client_error = (
                 isinstance(exc, RuntimeError)
                 and ("401 Unauthorized" in str(exc) or "403 Forbidden" in str(exc))
             ) or (
                 isinstance(exc, requests.HTTPError)
                 and exc.response is not None
-                and exc.response.status_code in (401, 403)
+                and exc.response.status_code in (400, 401, 403, 404)
             )
-            if is_auth_error:
+            if is_client_error:
                 raise
+
 
             if verbose:
                 print(f"  Request attempt {attempt}/{max_retries} failed: {exc}")

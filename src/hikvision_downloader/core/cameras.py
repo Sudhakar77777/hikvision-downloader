@@ -81,8 +81,9 @@ def parse_tracks_xml(xml_text: str) -> tuple[dict[int, dict[str, int]], dict[int
         - mapping of channel_id -> {'main': track_id, 'sub': track_id, 'third': track_id, ...}
         - mapping of channel_id -> camera name (if present in attributes or elements)
     """
-    if not xml_text or not xml_text.strip():
+    if not isinstance(xml_text, str) or not xml_text.strip():
         return {}, {}
+
 
     root = ET.fromstring(xml_text)
     tracks_by_channel: dict[int, dict[str, int]] = {}
@@ -337,34 +338,54 @@ def discover_cameras_isapi(
     discovery_errors: list[str] = []
 
     # -------------------------------------------------------------------------
-    # Strategy 1: InputProxy Endpoints (Authoritative for IP NVRs & IP Cameras)
+    # 1. Fetch active recording tracks from /ISAPI/ContentMgmt/record/tracks
+    # -------------------------------------------------------------------------
+    tracks_url = f"http://{host_str}/ISAPI/ContentMgmt/record/tracks"
+    tracks_by_channel: dict[int, dict[str, int]] = {}
+    track_names: dict[int, str] = {}
+    try:
+        tracks_resp = request_with_retry(session, "GET", tracks_url, timeout=timeout)
+        tracks_by_channel, track_names = parse_tracks_xml(tracks_resp.text)
+    except (requests.RequestException, ET.ParseError, RuntimeError, ValueError, TimeoutError, OSError) as trk_err:
+        discovery_errors.append(f"Record tracks: {trk_err}")
+
+    # -------------------------------------------------------------------------
+    # 2. Fetch camera names and individual IP addresses from InputProxy
     # -------------------------------------------------------------------------
     input_proxy_url = f"http://{host_str}/ISAPI/ContentMgmt/InputProxy/channels"
     status_proxy_url = f"http://{host_str}/ISAPI/ContentMgmt/InputProxy/channels/status"
+    channels_data: dict[int, dict[str, str]] = {}
+    status_data: dict[int, dict[str, object]] = {}
 
     try:
         channels_resp = request_with_retry(session, "GET", input_proxy_url, timeout=timeout)
         channels_data = parse_input_proxy_channels_xml(channels_resp.text)
+    except (requests.RequestException, ET.ParseError, RuntimeError, ValueError, TimeoutError, OSError) as ip_err:
+        discovery_errors.append(f"InputProxy channels: {ip_err}")
 
-        status_data: dict[int, dict[str, object]] = {}
-        try:
-            status_resp = request_with_retry(session, "GET", status_proxy_url, timeout=timeout)
-            status_data = parse_input_proxy_status_xml(status_resp.text)
-        except (requests.RequestException, ET.ParseError, RuntimeError, ValueError, TimeoutError, OSError) as st_err:
-            discovery_errors.append(f"InputProxy status: {st_err}")
+    try:
+        status_resp = request_with_retry(session, "GET", status_proxy_url, timeout=timeout)
+        status_data = parse_input_proxy_status_xml(status_resp.text)
+    except (requests.RequestException, ET.ParseError, RuntimeError, ValueError, TimeoutError, OSError) as st_err:
+        discovery_errors.append(f"InputProxy status: {st_err}")
 
-        if channels_data:
-            cameras: dict[CameraNumber, Camera] = {}
-            for ch_id, ch_info in sorted(channels_data.items()):
-                ch_num = CameraNumber(ch_id)
-                name = ch_info.get("name") or f"Camera_{ch_id}"
-                ip_addr = ch_info.get("ip_address") or str(status_data.get(ch_id, {}).get("ip_address", ""))
-                if not ip_addr:
-                    ip_addr = host
+    if channels_data:
+        cameras: dict[CameraNumber, Camera] = {}
+        for ch_id, ch_info in sorted(channels_data.items()):
+            ch_num = CameraNumber(ch_id)
+            name = ch_info.get("name") or track_names.get(ch_id) or f"Camera_{ch_id}"
+            ip_addr = ch_info.get("ip_address") or str(status_data.get(ch_id, {}).get("ip_address", ""))
+            if not ip_addr:
+                ip_addr = host
 
-                st = status_data.get(ch_id, {})
+            tracks_mapping: dict[str, TrackId] = {}
+            if tracks_by_channel.get(ch_id):
+                for s_name, s_val in tracks_by_channel[ch_id].items():
+                    tracks_mapping[str(s_name)] = TrackId(int(s_val))
+
+            elif ch_id in status_data:
+                st = status_data[ch_id]
                 st_tracks_raw = st.get("tracks")
-                tracks_mapping: dict[str, TrackId] = {}
                 if isinstance(st_tracks_raw, dict):
                     for s_name, s_val in st_tracks_raw.items():
                         try:
@@ -372,52 +393,34 @@ def discover_cameras_isapi(
                         except (ValueError, TypeError):
                             pass
 
-                main_track_int = int(str(st.get("main_track", ch_id * 100 + 1)))
-                sub_track_raw = st.get("sub_track", 0)
-                sub_track_int = int(str(sub_track_raw)) if sub_track_raw is not None else 0
+            if not tracks_mapping:
+                tracks_mapping["main"] = TrackId(ch_id * 100 + 1)
 
-                if "main" not in tracks_mapping:
-                    tracks_mapping["main"] = TrackId(main_track_int)
-                if "sub" not in tracks_mapping and sub_track_int > 0:
-                    tracks_mapping["sub"] = TrackId(sub_track_int)
+            main_track_val = tracks_mapping.get("main", TrackId(ch_id * 100 + 1))
+            sub_track_val = tracks_mapping.get("sub", TrackId(0))
 
-                main_track_val = tracks_mapping.get("main", TrackId(main_track_int))
-                sub_track_val = tracks_mapping.get("sub", TrackId(sub_track_int))
-
-                cameras[ch_num] = Camera(
-                    number=ch_num,
-                    name=name,
-                    ip_address=ip_addr,
-                    main_track=main_track_val,
-                    sub_track=sub_track_val,
-                    tracks=tracks_mapping,
-                )
-            return cameras
-
-    except (requests.RequestException, ET.ParseError, RuntimeError, ValueError, TimeoutError, OSError) as ip_err:
-        discovery_errors.append(f"InputProxy channels: {ip_err}")
+            cameras[ch_num] = Camera(
+                number=ch_num,
+                name=name,
+                ip_address=ip_addr,
+                main_track=main_track_val,
+                sub_track=sub_track_val,
+                tracks=tracks_mapping,
+            )
+        return cameras
 
     # -------------------------------------------------------------------------
-    # Strategy 2: ContentMgmt Tracks + Streaming Channels (Legacy / Fallback)
+    # 3. Strategy 2: ContentMgmt Tracks + Streaming Channels (Legacy / Fallback)
     # -------------------------------------------------------------------------
-    tracks_url = f"http://{host_str}/ISAPI/ContentMgmt/record/tracks"
     streaming_url = f"http://{host_str}/ISAPI/Streaming/channels"
-    tracks_by_channel: dict[int, dict[str, int]] = {}
-    channel_names: dict[int, str] = {}
-
-    try:
-        tracks_resp = request_with_retry(session, "GET", tracks_url, timeout=timeout)
-        tracks_by_channel, track_names = parse_tracks_xml(tracks_resp.text)
-        channel_names.update(track_names)
-    except (requests.RequestException, ET.ParseError, RuntimeError, ValueError, TimeoutError, OSError) as trk_err:
-        discovery_errors.append(f"Record tracks: {trk_err}")
+    channel_names: dict[int, str] = dict(track_names)
 
     try:
         streaming_resp = request_with_retry(session, "GET", streaming_url, timeout=timeout)
         streaming_names = parse_streaming_channels_xml(streaming_resp.text)
-        for ch_num_val, name in streaming_names.items():
+        for ch_num_val, s_name in streaming_names.items():
             if ch_num_val not in channel_names or not channel_names[ch_num_val]:
-                channel_names[ch_num_val] = name
+                channel_names[ch_num_val] = s_name
     except (requests.RequestException, ET.ParseError, RuntimeError, ValueError, TimeoutError, OSError) as stream_err:
         discovery_errors.append(f"Streaming channels: {stream_err}")
 
@@ -433,15 +436,13 @@ def discover_cameras_isapi(
         tracks_mapping = {k: TrackId(int(v)) for k, v in ch_tracks.items()}
         if "main" not in tracks_mapping:
             tracks_mapping["main"] = TrackId(ch_id_val * 100 + 1)
-        if "sub" not in tracks_mapping:
-            tracks_mapping["sub"] = TrackId(ch_id_val * 100 + 2)
 
         main_track = tracks_mapping["main"]
         sub_track = tracks_mapping.get("sub", TrackId(0))
-        name = channel_names.get(ch_id_val) or f"Camera_{ch_id_val}"
+        cam_name = channel_names.get(ch_id_val) or f"Camera_{ch_id_val}"
         fallback_cameras[ch_cam_num] = Camera(
             number=ch_cam_num,
-            name=name,
+            name=cam_name,
             ip_address=host,
             main_track=main_track,
             sub_track=sub_track,

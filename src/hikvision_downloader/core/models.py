@@ -227,6 +227,9 @@ class DownloadProgress(BaseModel):
     speed_mbps: MegabitsPerSecond = Field(..., description="Instantaneous transfer speed in Mbps")
     elapsed_seconds: float = Field(..., ge=0.0, description="Elapsed time for current file in seconds")
     is_skipped: bool = Field(default=False, description="Whether the file was skipped because it already exists")
+    is_completed: bool = Field(default=False, description="Whether the file download has completed")
+    start_time: str | None = Field(default=None, description="Recording segment start ISO time")
+    end_time: str | None = Field(default=None, description="Recording segment end ISO time")
 
     @model_validator(mode="after")
     def validate_progress_fields(self) -> Self:
