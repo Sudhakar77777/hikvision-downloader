@@ -15,7 +15,7 @@ Every task MUST follow this strict step-by-step lifecycle. Never skip steps with
 
 ## Phase 2: Implementation & Verification
 6. Implement ONLY what was approved in the plan.
-7. Run tests and static checks to confirm task completion and avoid regressions.
+7. Run tests and static checks to confirm task completion and avoid regressions.  Ensure all including integration tests are executed.
 8. Create the walkthrough document: `.gemini/logs/task-<task-id>-walkthrough.md` containing:
    - What was implemented compared against the plan.
    - Verification results, test outputs, or CLI demonstrations.

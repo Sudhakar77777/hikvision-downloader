@@ -36,58 +36,48 @@ The goal of Task 005 was to construct a robust, production-ready Command-Line In
 - Updated `src/hikvision_downloader/downloader.py`: Delegated `main()` to `hikvision_downloader.cli.app:main`.
 - Updated `pyproject.toml`: Configured `[project.scripts]` to point `hikvision-downloader = "hikvision_downloader.cli.app:main"`.
 
-### 2.4 Unit Test Suite (`tests/unit/test_cli.py`)
-- Added 31 unit tests covering:
-  - Default CLI arguments and custom flag parsing.
-  - `--help` formatting and epilog documentation.
-  - Date parsing (valid ISO format, invalid format rejection).
-  - Stream type parsing (`main`, `sub`, case insensitivity, rejection of invalid streams).
-  - Range parsing (`all`, hyphen `1-10`, colon `1:10`, space `1 10`, single `5`, boundary checks, invalid formats).
-  - Camera resolution by number, exact name, lower-case name, display name, and archive name.
-  - `display_abort_notice` and `display_error` formatting.
-  - `setup_signal_handler` and `cancel_event` activation.
-  - Headless mode missing parameter validation (`--date`, `--camera`, `--stream`).
-  - Headless mode successful download execution and error exit handling.
-  - Interactive mode cancel paths (date cancelled, camera cancelled, stream cancelled, no recordings, confirmation declined).
-  - Mid-download signal cancellation returning exit code 130.
+### 2.4 Module Entrypoint & Circular Import Resolution
+- **`config.py` Decoupling**: Removed eager domain imports and module-level `RuntimeError` from `config.py` to prevent import-time crashes and circular dependencies (`config` -> `core` -> `dates` -> `http_client` -> `config`).
+- **`__main__.py`**: Added `src/hikvision_downloader/__main__.py` and `if __name__ == "__main__": main()` to `cli/app.py` for direct module execution (`python -m hikvision_downloader`).
+
+### 2.5 Unit & Subprocess Integration Test Suite
+- **Unit Tests (`tests/unit/test_cli.py`)**: Added 31 unit tests covering argument parsing, stream validation, range variations, camera resolution, and signal interruption.
+- **Subprocess Integration Tests (`tests/integration/test_cli_commands.py`)**: Added 4 subprocess integration tests validating that `uv run hikvision-downloader --help`, `python -m hikvision_downloader --help`, `--version`, and `--non-interactive` execute in fresh processes with zero circular imports or unhandled exceptions.
 
 ---
 
 ## 3. Verification & Test Results
 
-### 3.1 Pytest Test Suite
+### 3.1 Pytest Full Test Suite & Live NVR Integration Tests
 ```bash
 $ uv run pytest
+============================== 91 passed in 3.26s ==============================
+
+$ uv run pytest -m integration -v -s
 ============================= test session starts ==============================
-platform darwin -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
-rootdir: /Volumes/MinionDev/Workspace/CCTV/hikvision-downloader
-configfile: pyproject.toml
-testpaths: tests
-plugins: mock-3.16.0
-collecting ... collected 86 items
+tests/integration/test_cli_commands.py::test_cli_help_subprocess PASSED
+tests/integration/test_cli_commands.py::test_cli_version_subprocess PASSED
+tests/integration/test_cli_commands.py::test_cli_entrypoint_script_subprocess PASSED
+tests/integration/test_cli_commands.py::test_cli_non_interactive_validation_subprocess PASSED
+tests/integration/test_cli_commands.py::test_live_cli_execution_with_nvr PASSED
+tests/integration/test_live_nvr.py::test_live_nvr_connection_and_discovery PASSED
 
-tests/functional/test_cancellation.py ....                               [  4%]
-tests/functional/test_download_engine.py ..........                      [ 16%]
-tests/integration/test_live_nvr.py .                                     [ 17%]
-tests/unit/test_cameras.py .......                                       [ 25%]
-tests/unit/test_cli.py ...............................                   [ 61%]
-tests/unit/test_dates.py .........                                       [ 72%]
-tests/unit/test_models.py ..............                                 [ 88%]
-tests/unit/test_recordings.py ..........                                 [100%]
-
-============================== 86 passed in 0.20s ==============================
+======================= 6 passed, 85 deselected in 3.15s =======================
 ```
+
 
 ### 3.2 Static Type Checking (mypy) & Linting (ruff)
 ```bash
 $ uv run mypy src tests && uv run ruff check .
-Success: no issues found in 26 source files
+Success: no issues found in 28 source files
 All checks passed!
 ```
 
 ---
 
 ## 4. Invariant Compliance
-- **100% Strict Type Annotations**: All new functions, arguments, and return types in `cli/app.py`, `cli/formatters.py`, and `tests/unit/test_cli.py` have explicit type annotations with zero bare `Any`.
+- **100% Strict Type Annotations**: All new functions, arguments, and return types in `cli/app.py`, `cli/formatters.py`, `tests/unit/test_cli.py`, and `tests/integration/test_cli_commands.py` have explicit type annotations with zero bare `Any`.
 - **Decoupled Architecture**: `core/` modules remain free of CLI dependencies (`print`, `input`), while `cli/` handles user presentation and interaction.
 - **Graceful Interruption**: `SIGINT` (`Ctrl+C`) immediately activates the cancellation token, ensuring temporary `.part` files are unlinked and execution exits cleanly with status code 130 without tracebacks.
+- **Clean Subprocess Execution**: Direct execution via `uv run hikvision-downloader --help` and `python -m hikvision_downloader` tested and passing without circular imports.
+

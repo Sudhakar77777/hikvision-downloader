@@ -22,7 +22,7 @@ from ..config import (
 from ..core.cameras import load_cameras
 from ..core.dates import discover_available_dates
 from ..core.downloads import download_recordings, format_duration
-from ..core.models import Camera, CameraNumber, Recording, RecordingDate, StreamType
+from ..core.models import Camera, CameraNumber, Recording, RecordingDate, StreamType, TrackId
 from ..core.recordings import get_all_recordings, recording_total_size, save_recording_list
 from ..http_client import make_session
 from .formatters import (
@@ -223,7 +223,7 @@ def discover_dates(session: requests.Session, host: str) -> dict[tuple[int, int]
         months, discovery_duration = discover_available_dates(
             session=session,
             host=host,
-            discovery_track_id=DATE_DISCOVERY_TRACK_ID,
+            discovery_track_id=TrackId(DATE_DISCOVERY_TRACK_ID),
             timeout=TIMEOUT,
         )
     except (requests.RequestException, ET.ParseError, RuntimeError, ValueError) as exc:
@@ -509,3 +509,8 @@ def main() -> None:
     """Console script entry point."""
     exit_code = run_app(sys.argv[1:])
     sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()
+

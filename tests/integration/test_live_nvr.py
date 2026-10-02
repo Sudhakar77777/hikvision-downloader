@@ -1,4 +1,5 @@
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from dotenv import dotenv_values
 
 from hikvision_downloader.core.dates import search_month
 from hikvision_downloader.core.models import TrackId
+from hikvision_downloader.core.recordings import search_recordings
 from hikvision_downloader.http_client import make_session
 
 
@@ -25,8 +27,7 @@ def test_live_nvr_connection_and_discovery() -> None:
 
     try:
         session = make_session(cookie=cookie)
-        # Attempt to discover dates for track 101 on the live hardware
-        search_month(
+        months = search_month(
             session=session,
             host=host,
             track_id=TrackId(101),
@@ -34,5 +35,17 @@ def test_live_nvr_connection_and_discovery() -> None:
             month=9,
             timeout=10.0,
         )
+        assert len(months) > 0
+
+        recs = search_recordings(
+            session=session,
+            host=host,
+            track_id=TrackId(101),
+            recording_date=date(2026, 9, 15),
+            position=0,
+            batch_size=50,
+            timeout=10.0,
+        )
+        assert len(recs) > 0
     except (requests.RequestException, RuntimeError, TimeoutError) as exc:
         pytest.skip(f"Integration test skipped: Live NVR hardware unreachable or returned error: {exc}")

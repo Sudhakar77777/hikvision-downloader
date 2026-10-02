@@ -16,7 +16,7 @@ from .config import (
 )
 from .core.dates import discover_available_dates
 from .core.downloads import format_duration
-from .core.models import Camera, Recording, RecordingDate, StreamType
+from .core.models import Camera, Recording, RecordingDate, StreamType, TrackId
 from .core.recordings import get_all_recordings, recording_total_size
 
 # ============================================================
@@ -34,7 +34,7 @@ def discover_dates(session: requests.Session, host: str) -> dict[tuple[int, int]
         months, discovery_duration = discover_available_dates(
             session=session,
             host=host,
-            discovery_track_id=DATE_DISCOVERY_TRACK_ID,
+            discovery_track_id=TrackId(DATE_DISCOVERY_TRACK_ID),
             timeout=TIMEOUT,
         )
     except (requests.RequestException, ET.ParseError, RuntimeError, ValueError) as exc:
