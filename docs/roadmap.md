@@ -17,11 +17,11 @@ The ultimate goal of Hikvision Downloader is to provide a **public, production-g
 ## 2. Phased Development Roadmap
 
 ```
-Phase 1: Docs Modularization & Architecture Contract (Task 002) [CURRENT]
+Phase 1: Docs Modularization & Architecture Contract (Task 002) [COMPLETED]
    │
-Phase 2: Core Decoupling & Dataclass Contract (Task 003)
+Phase 2: Core Decoupling & Dataclass Contract (Task 003) [COMPLETED]
    │
-Phase 3: Testing & Fixture-Based Mocking Suite (Task 004)
+Phase 3: Testing & Fixture-Based Mocking Suite (Task 004) [CURRENT]
    │
 Phase 4: Headless CLI Engine & Entry Point (Task 005)
    │
@@ -36,7 +36,7 @@ Phase 7: Packaging, CI/CD, & Public Release (Task 008)
 
 ### Phase 1: Documentation Modularization & Synchronization
 - **Task ID:** `002-docs-modularization`
-- **Status:** **Completed / Active**
+- **Status:** **Completed**
 - **Deliverables:**
   - Decompose legacy monolithic `TODO.md` into `docs/requirements.md`, `docs/architecture.md`, and `docs/roadmap.md`.
   - Ensure all problem statements, architecture flows, and packaging goals from `README.md` and `docs/hld-plan.md` are formally captured.
@@ -46,7 +46,7 @@ Phase 7: Packaging, CI/CD, & Public Release (Task 008)
 
 ### Phase 2: Core Service Decoupling & Dataclass Contract
 - **Task ID:** `003-core-decoupling`
-- **Status:** Planned
+- **Status:** **Completed**
 - **Deliverables:**
   - Restructure `src/hikvision_downloader/` into `core/`, `cli/`, and `ui/`.
   - Isolate all business logic (`dates.py`, `cameras.py`, `recordings.py`, `downloads.py`) from presentation logic.

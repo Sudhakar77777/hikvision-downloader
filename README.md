@@ -267,6 +267,17 @@ output/
 src/
 └── hikvision_downloader/
     ├── __init__.py
+    ├── core/
+    │   ├── __init__.py
+    │   ├── models.py
+    │   ├── dates.py
+    │   ├── cameras.py
+    │   ├── recordings.py
+    │   └── downloads.py
+    ├── cli/
+    │   ├── __init__.py
+    │   ├── formatters.py
+    │   └── interactive.py
     ├── cameras.py
     ├── config.py
     ├── dates.py

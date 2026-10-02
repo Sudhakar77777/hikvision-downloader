@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from hikvision-downloader!")
+"""Hikvision Downloader package."""
+
+__version__ = "0.1.0"
