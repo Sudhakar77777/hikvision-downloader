@@ -291,18 +291,31 @@ def test_discovery_worker(qapp: QApplication, sample_camera: Camera, monkeypatch
     def mock_get_cameras(*args: object, **kwargs: object) -> dict[CameraNumber, Camera]:
         return {CameraNumber(1): sample_camera}
 
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "<DeviceInfo><model>DS-7608NI-I2</model><firmwareVersion>V4.50.000</firmwareVersion></DeviceInfo>"
+
     monkeypatch.setattr(
         "hikvision_downloader.ui.workers.CameraDiscoveryService.get_cameras",
         mock_get_cameras,
     )
+    monkeypatch.setattr(
+        "hikvision_downloader.ui.workers.request_with_retry",
+        lambda *args, **kwargs: mock_resp,
+    )
 
     worker = DiscoveryWorker(session, "192.168.1.100", 80)
     discovered: list[dict[CameraNumber, Camera]] = []
+    device_infos: list[dict[str, str]] = []
     worker.signal_cameras.connect(lambda cams: discovered.append(cams))
+    worker.signal_device_info.connect(lambda info: device_infos.append(info))
 
     worker.run()
     assert len(discovered) == 1
     assert CameraNumber(1) in discovered[0]
+    assert len(device_infos) == 1
+    assert device_infos[0].get("model") == "DS-7608NI-I2"
+    assert device_infos[0].get("firmwareVersion") == "V4.50.000"
 
 
 def test_dates_worker(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -424,13 +437,15 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     assert window.windowTitle() == "HikVision Downloader"
     assert window.host_input.text() is not None
     assert window.port_input.width() == 50
+    assert window.user_input.minimumWidth() >= 115
     assert window.start_hh_combo.width() == 56
     assert window.start_mm_combo.width() == 56
     assert window.left_panel.minimumWidth() >= 410
     assert window.main_splitter.isCollapsible(0) is False
-    assert window.camera_scroll.maximumHeight() == 220
+    assert window.camera_scroll.minimumHeight() == 240
     assert window.worker_slider.value() >= 1
     assert window.stream_combo.count() == 1
+    assert window.footer_device_label.text() == "Disconnected · Ready"
     assert ARIVEDHA_LOGO_SVG_PATH.exists()
 
     # Populate camera checklist
@@ -438,6 +453,17 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     assert len(window._camera_rows) == 1
     assert window._camera_rows[0].camera.display_name == "D1 MainGate"
     assert window.stream_combo.count() == 2  # Has HD and SD
+
+    # Deselect all cameras check
+    window._set_all_cameras_checked(False)
+    assert window._camera_rows[0].is_selected is False
+    window._set_all_cameras_checked(True)
+    assert window._camera_rows[0].is_selected is True
+
+    # Device Info update check
+    window._on_device_info_discovered({"model": "DS-7608NI-K2", "firmwareVersion": "V4.30.060"})
+    assert "Model: DS-7608NI-K2" in window.footer_device_label.text()
+    assert "Firmware: V4.30.060" in window.footer_device_label.text()
 
     # Theme toggle
     window._toggle_theme()
@@ -459,6 +485,7 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     window._disconnect_session()
     assert window.connect_btn.text() == "Connect"
     assert window._session is None
+    assert window.footer_device_label.text() == "Disconnected · Ready"
 
     # Calendar dates highlight
     sample_dates = {(2026, 10): [RecordingDate(year=2026, month=10, day=1), RecordingDate(year=2026, month=10, day=2)]}

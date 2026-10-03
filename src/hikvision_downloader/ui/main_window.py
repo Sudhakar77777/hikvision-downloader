@@ -145,6 +145,7 @@ class MainWindow(QMainWindow):
         self._discovered_cameras: dict[CameraNumber, Camera] = {}
         self._camera_rows: list[CameraRowWidget] = []
         self._discovered_dates: dict[tuple[int, int], list[RecordingDate]] = {}
+        self._device_info: dict[str, str] = {}
 
         # Active Workers
         self._auth_worker: AuthWorker | None = None
@@ -236,7 +237,7 @@ class MainWindow(QMainWindow):
         form_layout.addWidget(QLabel("User:", self))
         self.user_input = QLineEdit(self)
         self.user_input.setPlaceholderText("admin")
-        self.user_input.setMaximumWidth(90)
+        self.user_input.setMinimumWidth(115)
         self.user_input.setText(NVR_USERNAME or "admin")
         form_layout.addWidget(self.user_input)
 
@@ -269,14 +270,14 @@ class MainWindow(QMainWindow):
         self.status_badge = QLabel("● Disconnected", self)
         self.status_badge.setObjectName("statusBadge")
         self.status_badge.setStyleSheet(
-            "background-color: #334155; color: #94A3B8; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+            "background-color: #334155; color: #94A3B8; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
         )
         h_layout.addWidget(self.status_badge)
 
         # Theme Switcher Button
         self.theme_btn = QPushButton("☀️", self)
         self.theme_btn.setObjectName("secondaryBtn")
-        self.theme_btn.setFixedSize(32, 26)
+        self.theme_btn.setFixedSize(32, 28)
         self.theme_btn.setToolTip("Toggle Light/Dark Theme")
         self.theme_btn.clicked.connect(self._toggle_theme)
         h_layout.addWidget(self.theme_btn)
@@ -316,9 +317,9 @@ class MainWindow(QMainWindow):
 
         f_layout.addStretch(1)
 
-        version_label = QLabel("v0.1.0-alpha • Automated ISAPI Engine", self)
-        version_label.setStyleSheet("font-size: 11px; color: #64748B; border: none; background: transparent;")
-        f_layout.addWidget(version_label)
+        self.footer_device_label = QLabel("Disconnected · Ready", self)
+        self.footer_device_label.setStyleSheet("font-size: 11px; color: #64748B; border: none; background: transparent;")
+        f_layout.addWidget(self.footer_device_label)
 
         self._root_layout.addWidget(footer)
 
@@ -340,7 +341,7 @@ class MainWindow(QMainWindow):
         # 1. Camera Channels & Stream Quality Group
         left_layout.addWidget(self._build_camera_group())
 
-        # 2. Investigation Time Window Group
+        # 2. Recording Time Window Group
         left_layout.addWidget(self._build_time_group())
 
         left_layout.addStretch(1)
@@ -434,7 +435,7 @@ class MainWindow(QMainWindow):
         self.camera_scroll = QScrollArea(self)
         self.camera_scroll.setWidgetResizable(True)
         self.camera_scroll.setWidget(self.camera_list_container)
-        self.camera_scroll.setMaximumHeight(220)
+        self.camera_scroll.setMinimumHeight(400)
         layout.addWidget(self.camera_scroll)
 
         # Stream Quality Dropdown
@@ -451,7 +452,7 @@ class MainWindow(QMainWindow):
         return group
 
     def _build_time_group(self) -> QGroupBox:
-        group = QGroupBox("Investigation Time Window", self)
+        group = QGroupBox("Recording Time Window", self)
         layout = QVBoxLayout(group)
         layout.setSpacing(10)
 
@@ -548,6 +549,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(8)
 
+        # Section Header
+        section_title = QLabel("DOWNLOAD SETTINGS", self)
+        section_title.setStyleSheet("font-size: 12px; font-weight: 700; color: #38BDF8; letter-spacing: 0.5px;")
+        layout.addWidget(section_title)
+
         # Line 1: Output Directory + Browse ToolButton + Space Validation Pill
         row1 = QHBoxLayout()
         row1.setSpacing(8)
@@ -602,6 +608,11 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
+
+        # Section Header
+        section_title = QLabel("RECORDINGS / VIDEO FILES", self)
+        section_title.setStyleSheet("font-size: 12px; font-weight: 700; color: #38BDF8; letter-spacing: 0.5px;")
+        layout.addWidget(section_title)
 
         # Top Bar: Counters and Selection Actions
         top_bar = QHBoxLayout()
@@ -660,7 +671,7 @@ class MainWindow(QMainWindow):
         header_bar.setSpacing(10)
         header_bar.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        console_title = QLabel("Live Activity Console", self)
+        console_title = QLabel("Live Console", self)
         console_title.setStyleSheet("font-weight: bold; color: #38BDF8; font-size: 12px;")
         header_bar.addWidget(console_title)
 
@@ -686,7 +697,7 @@ class MainWindow(QMainWindow):
 
         clear_btn = QPushButton("Clear", self)
         clear_btn.setObjectName("secondaryBtn")
-        clear_btn.setFixedHeight(22)
+        clear_btn.setFixedHeight(24)
         clear_btn.clicked.connect(self._on_clear_console)
         header_bar.addWidget(clear_btn)
 
@@ -800,7 +811,7 @@ class MainWindow(QMainWindow):
         self.connect_btn.setEnabled(False)
         self.status_badge.setText("● Connecting...")
         self.status_badge.setStyleSheet(
-            "background-color: #78350F; color: #F59E0B; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+            "background-color: #78350F; color: #F59E0B; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
         )
 
         self._auth_worker = AuthWorker(
@@ -826,8 +837,15 @@ class MainWindow(QMainWindow):
             self.connect_btn.style().polish(self.connect_btn)
             self.status_badge.setText("● Connected")
             self.status_badge.setStyleSheet(
-                "background-color: #064E3B; color: #10B981; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+                "background-color: #064E3B; color: #10B981; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
             )
+
+            # Clear focus from input controls and focus search button
+            self.host_input.clearFocus()
+            self.user_input.clearFocus()
+            self.password_input.clearFocus()
+            self.search_btn.setFocus()
+
             self._trigger_discovery(force_refresh=False)
             self._trigger_dates_discovery()
         else:
@@ -838,7 +856,7 @@ class MainWindow(QMainWindow):
             self.connect_btn.style().polish(self.connect_btn)
             self.status_badge.setText("● Auth Failed")
             self.status_badge.setStyleSheet(
-                "background-color: #7F1D1D; color: #EF4444; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+                "background-color: #7F1D1D; color: #EF4444; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
             )
             QMessageBox.critical(self, "Authentication Failed", f"Could not authenticate with NVR:\n{message}")
 
@@ -858,6 +876,7 @@ class MainWindow(QMainWindow):
         self._discovered_cameras.clear()
         self._camera_rows.clear()
         self._discovered_dates.clear()
+        self._device_info.clear()
         self._rebuild_camera_checklist()
         self._update_stream_options()
         self._table_model.clear()
@@ -867,8 +886,9 @@ class MainWindow(QMainWindow):
         self.connect_btn.style().polish(self.connect_btn)
         self.status_badge.setText("● Disconnected")
         self.status_badge.setStyleSheet(
-            "background-color: #334155; color: #94A3B8; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+            "background-color: #334155; color: #94A3B8; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
         )
+        self.footer_device_label.setText("Disconnected · Ready")
         self.log_message("INFO", "Disconnected from NVR session.")
 
     def _on_refresh_cameras_clicked(self) -> None:
@@ -894,6 +914,7 @@ class MainWindow(QMainWindow):
         )
         self._discovery_worker.signal_log.connect(self.log_message)
         self._discovery_worker.signal_cameras.connect(self._on_discovery_cameras)
+        self._discovery_worker.signal_device_info.connect(self._on_device_info_discovered)
         self._discovery_worker.signal_error.connect(lambda err: QMessageBox.warning(self, "Discovery Warning", err))
         self._discovery_worker.start()
 
@@ -912,6 +933,14 @@ class MainWindow(QMainWindow):
         self._dates_worker.signal_log.connect(self.log_message)
         self._dates_worker.signal_dates.connect(self._on_dates_discovered)
         self._dates_worker.start()
+
+    def _on_device_info_discovered(self, info: object) -> None:
+        if isinstance(info, dict):
+            self._device_info = {str(k): str(v) for k, v in info.items()}
+            model = self._device_info.get("model") or self._device_info.get("modelName") or "Hikvision NVR"
+            fw = self._device_info.get("firmwareVersion") or "Unknown"
+            count = len(self._discovered_cameras)
+            self.footer_device_label.setText(f"Model: {model}  |  Firmware: {fw}  |  Active Channels: {count}")
 
     def _on_dates_discovered(self, dates_by_month: object) -> None:
         if not isinstance(dates_by_month, dict):
@@ -937,6 +966,14 @@ class MainWindow(QMainWindow):
         self._discovered_cameras = cameras
         self._rebuild_camera_checklist()
         self._update_stream_options()
+
+        if self._device_info:
+            model = self._device_info.get("model") or self._device_info.get("modelName") or "Hikvision NVR"
+            fw = self._device_info.get("firmwareVersion") or "Unknown"
+            self.footer_device_label.setText(f"Model: {model}  |  Firmware: {fw}  |  Active Channels: {len(cameras)}")
+        elif self.footer_device_label.text() in ("Disconnected · Ready", "") or "Connected:" in self.footer_device_label.text():
+            host = self.host_input.text().strip()
+            self.footer_device_label.setText(f"Connected: {host} ({len(cameras)} Channels)")
 
     def _update_stream_options(self) -> None:
         """Update stream quality dropdown based on discovered camera tracks."""

@@ -4,6 +4,7 @@ import threading
 import time
 from datetime import date
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import requests
 from pydantic import SecretStr
@@ -99,6 +100,7 @@ class DiscoveryWorker(QThread):
 
     signal_started = Signal()
     signal_cameras = Signal(object)  # dict[CameraNumber, Camera]
+    signal_device_info = Signal(object)  # dict[str, str]
     signal_error = Signal(str)
     signal_log = Signal(str, str)
 
@@ -120,6 +122,22 @@ class DiscoveryWorker(QThread):
     def run(self) -> None:
         self.signal_started.emit()
         self.signal_log.emit("INFO", f"Discovering cameras on NVR {self.host}:{self.port} (force_refresh={self.force_refresh})...")
+
+        # Attempt to retrieve device hardware metadata
+        device_info: dict[str, str] = {}
+        try:
+            host_str = self.host if (":" in self.host or self.port == 80) else f"{self.host}:{self.port}"
+            resp = request_with_retry(self.session, "GET", f"http://{host_str}/ISAPI/System/deviceInfo", timeout=10.0)
+            root = ET.fromstring(resp.text)
+            for child in root.iter():
+                tag = child.tag.split("}")[-1]
+                if child.text:
+                    device_info[tag] = child.text.strip()
+        except (requests.RequestException, ET.ParseError, OSError, ValueError) as exc:
+            self.signal_log.emit("DEBUG", f"Device info query skipped: {exc}")
+
+        if device_info:
+            self.signal_device_info.emit(device_info)
 
         try:
             cameras = self._service.get_cameras(

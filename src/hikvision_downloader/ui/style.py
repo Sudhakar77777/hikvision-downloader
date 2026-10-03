@@ -112,6 +112,15 @@ QComboBox::drop-down {
     border-bottom-right-radius: 6px;
 }
 
+QDateEdit::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 32px;
+    border-left: 1px solid #334155;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
 QComboBox QAbstractItemView {
     background-color: #162032;
     border: 1px solid #334155;
@@ -475,10 +484,12 @@ QPlainTextEdit#consoleLog {
 
 /* Status & Space Badges */
 QLabel#statusBadge {
-    padding: 2px 6px;
+    height: 28px;
+    line-height: 28px;
+    padding: 2px 10px;
     border-radius: 8px;
     font-weight: 600;
-    font-size: 10px;
+    font-size: 11px;
 }
 
 QLabel#spaceBadge {
@@ -596,6 +607,15 @@ QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
     width: 18px;
+    border-left: 1px solid #CBD5E1;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+QDateEdit::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 32px;
     border-left: 1px solid #CBD5E1;
     border-top-right-radius: 6px;
     border-bottom-right-radius: 6px;
@@ -963,10 +983,12 @@ QPlainTextEdit#consoleLog {
 
 /* Status & Space Badges */
 QLabel#statusBadge {
-    padding: 2px 6px;
+    height: 28px;
+    line-height: 28px;
+    padding: 2px 10px;
     border-radius: 8px;
     font-weight: 600;
-    font-size: 10px;
+    font-size: 11px;
 }
 
 QLabel#spaceBadge {
