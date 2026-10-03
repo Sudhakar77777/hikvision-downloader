@@ -147,7 +147,7 @@ class DiscoveryWorker(QThread):
                 force_refresh=self.force_refresh,
             )
             count = len(cameras)
-            self.signal_log.emit("SUCCESS", f"Discovered {count} camera channels on NVR.")
+            self.signal_log.emit("SUCCESS", f"Discovered {count} cameras on NVR.")
             self.signal_cameras.emit(cameras)
         except (requests.RequestException, OSError, RuntimeError, ValueError) as exc:
             msg = f"Camera discovery error: {exc}"
@@ -237,7 +237,7 @@ class SearchWorker(QThread):
         total_queries = len(self.camera_queries)
         self.signal_log.emit(
             "INFO",
-            f"Searching recordings for date {self.target_date.isoformat()} ({self.start_time_str} to {self.end_time_str}) across {total_queries} camera channels...",
+            f"Searching recordings for date {self.target_date.isoformat()} ({self.start_time_str} to {self.end_time_str}) across {total_queries} cameras...",
         )
 
         total_found = 0

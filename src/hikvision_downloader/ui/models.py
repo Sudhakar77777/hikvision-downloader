@@ -9,7 +9,7 @@ from typing import ClassVar
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QPersistentModelIndex, Qt
 from PySide6.QtGui import QBrush, QColor
 
-from ..core.models import Camera, Recording, TrackId
+from ..core.models import Camera, CameraNumber, Recording, TrackId
 
 _EMPTY_INDEX: QModelIndex = QModelIndex()
 
@@ -33,7 +33,7 @@ def format_iso_display(iso_str: str) -> str:
             clean = clean.split(".")[0]
         dt = datetime.fromisoformat(clean)
         return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return str(iso_str)
 
 
@@ -55,12 +55,187 @@ def check_disk_space(
     try:
         usage = shutil.disk_usage(target if target.exists() else Path("."))
         free_bytes = usage.free
-    except OSError, ValueError:
+    except (OSError, ValueError):
         free_bytes = 0
 
     safety_buffer = safety_margin_mb * 1024 * 1024
     has_space = free_bytes >= (required_bytes + safety_buffer)
     return has_space, required_bytes, free_bytes
+
+
+@dataclass
+class CameraItem:
+    """Represent one table row in the operator console camera selection view."""
+
+    camera: Camera
+    checked: bool = True
+
+    @property
+    def is_selected(self) -> bool:
+        return self.checked
+
+    @property
+    def number(self) -> int:
+        return int(self.camera.number)
+
+    @property
+    def display_name(self) -> str:
+        """Return exact camera name as returned from NVR/ISAPI discovery without alteration."""
+        return self.camera.name
+
+    @property
+    def model(self) -> str:
+        return self.camera.model or ""
+
+
+class CamerasTableModel(QAbstractTableModel):
+    """Table model for discovered NVR cameras supporting checkboxes and sorting."""
+
+    COL_CHECK: int = 0
+    COL_NUM: int = 1
+    COL_NAME: int = 2
+    COL_MODEL: int = 3
+
+    HEADERS: ClassVar[list[str]] = [
+        "",
+        "#",
+        "Camera Name",
+        "Hardware Model",
+    ]
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._items: list[CameraItem] = []
+
+    def rowCount(self, parent: QModelIndex | QPersistentModelIndex = _EMPTY_INDEX) -> int:
+        if parent.isValid():
+            return 0
+        return len(self._items)
+
+    def columnCount(self, parent: QModelIndex | QPersistentModelIndex = _EMPTY_INDEX) -> int:
+        if parent.isValid():
+            return 0
+        return len(self.HEADERS)
+
+    def headerData(
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ) -> object:
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole and 0 <= section < len(self.HEADERS):
+            return self.HEADERS[section]
+        if orientation == Qt.Orientation.Vertical and role == Qt.ItemDataRole.DisplayRole and 0 <= section < len(self._items):
+            return str(section + 1)
+        return None
+
+    def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+
+        default_flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if index.column() == self.COL_CHECK:
+            return default_flags | Qt.ItemFlag.ItemIsUserCheckable
+
+        return default_flags
+
+    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> object:
+        if not index.isValid() or not (0 <= index.row() < len(self._items)):
+            return None
+
+        item = self._items[index.row()]
+        col = index.column()
+
+        if role == Qt.ItemDataRole.CheckStateRole and col == self.COL_CHECK:
+            return Qt.CheckState.Checked if item.checked else Qt.CheckState.Unchecked
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == self.COL_NUM:
+                return str(index.row() + 1)
+            if col == self.COL_NAME:
+                return item.display_name
+            if col == self.COL_MODEL:
+                return item.model
+
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            if col in (self.COL_CHECK, self.COL_NUM):
+                return int(Qt.AlignmentFlag.AlignCenter)
+            return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if col == self.COL_NUM:
+                return QBrush(QColor("#64748B"))
+            if col == self.COL_MODEL:
+                return QBrush(QColor("#94A3B8"))
+
+        return None
+
+    def setData(self, index: QModelIndex | QPersistentModelIndex, value: object, role: int = Qt.ItemDataRole.EditRole) -> bool:
+        if not index.isValid() or not (0 <= index.row() < len(self._items)):
+            return False
+
+        item = self._items[index.row()]
+        if index.column() == self.COL_CHECK and role == Qt.ItemDataRole.CheckStateRole:
+            item.checked = value == Qt.CheckState.Checked or value is True or value == 2
+            self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
+            return True
+
+        return False
+
+    def set_cameras(self, cameras: list[Camera] | dict[CameraNumber, Camera]) -> None:
+        """Replace model contents with fresh camera items."""
+        self.beginResetModel()
+        cam_list: list[Camera] = list(cameras.values()) if isinstance(cameras, dict) else list(cameras)
+        cam_list.sort(key=lambda c: int(c.number))
+        self._items = [CameraItem(camera=c, checked=True) for c in cam_list]
+        self.endResetModel()
+
+    def clear(self) -> None:
+        """Clear all camera items from model."""
+        self.beginResetModel()
+        self._items.clear()
+        self.endResetModel()
+
+    def select_all(self, checked: bool = True) -> None:
+        """Set checked state for all camera items."""
+        if not self._items:
+            return
+        for item in self._items:
+            item.checked = checked
+        top_left = self.index(0, self.COL_CHECK)
+        bottom_right = self.index(len(self._items) - 1, self.COL_CHECK)
+        self.dataChanged.emit(top_left, bottom_right, [Qt.ItemDataRole.CheckStateRole])
+
+    def get_selected_cameras(self) -> list[Camera]:
+        """Return list of currently checked cameras."""
+        return [item.camera for item in self._items if item.checked]
+
+    def get_all_cameras(self) -> list[Camera]:
+        """Return list of all cameras in model."""
+        return [item.camera for item in self._items]
+
+    def get_items(self) -> list[CameraItem]:
+        """Return all CameraItem objects."""
+        return list(self._items)
+
+    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
+        """Sort rows by column."""
+        if not self._items:
+            return
+
+        reverse = order == Qt.SortOrder.DescendingOrder
+        self.beginResetModel()
+
+        if column == self.COL_CHECK:
+            self._items.sort(key=lambda x: x.checked, reverse=reverse)
+        elif column == self.COL_NUM:
+            self._items.sort(key=lambda x: int(x.camera.number), reverse=reverse)
+        elif column == self.COL_NAME:
+            self._items.sort(key=lambda x: (int(x.camera.number), x.camera.name), reverse=reverse)
+        elif column == self.COL_MODEL:
+            self._items.sort(key=lambda x: (x.camera.model or "", int(x.camera.number)), reverse=reverse)
+
+        self.endResetModel()
 
 
 @dataclass
@@ -86,19 +261,21 @@ class RecordingItem:
 
 
 class RecordingsTableModel(QAbstractTableModel):
-    """Table model for discovered NVR recording segments supporting checkboxes and sorting."""
+    """Table model for discovered NVR recording segments supporting checkboxes, row numbers, and sorting."""
 
     COL_CHECK: int = 0
-    COL_CAMERA: int = 1
-    COL_STREAM: int = 2
-    COL_FILENAME: int = 3
-    COL_START: int = 4
-    COL_END: int = 5
-    COL_SIZE: int = 6
-    COL_STATUS: int = 7
+    COL_NUM: int = 1
+    COL_CAMERA: int = 2
+    COL_STREAM: int = 3
+    COL_FILENAME: int = 4
+    COL_START: int = 5
+    COL_END: int = 6
+    COL_SIZE: int = 7
+    COL_STATUS: int = 8
 
     HEADERS: ClassVar[list[str]] = [
         "",
+        "#",
         "Camera",
         "Stream",
         "File Name",
@@ -155,8 +332,10 @@ class RecordingsTableModel(QAbstractTableModel):
             return Qt.CheckState.Checked if item.checked else Qt.CheckState.Unchecked
 
         if role == Qt.ItemDataRole.DisplayRole:
+            if col == self.COL_NUM:
+                return str(index.row() + 1)
             if col == self.COL_CAMERA:
-                return item.camera.display_name
+                return item.camera.name
             if col == self.COL_STREAM:
                 return item.stream.upper()
             if col == self.COL_FILENAME:
@@ -171,13 +350,15 @@ class RecordingsTableModel(QAbstractTableModel):
                 return item.status
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col in (self.COL_CHECK, self.COL_STREAM, self.COL_STATUS):
+            if col in (self.COL_CHECK, self.COL_NUM, self.COL_STREAM, self.COL_STATUS):
                 return int(Qt.AlignmentFlag.AlignCenter)
             if col == self.COL_SIZE:
                 return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         if role == Qt.ItemDataRole.ForegroundRole:
+            if col == self.COL_NUM:
+                return QBrush(QColor("#64748B"))
             if col == self.COL_STATUS:
                 if item.status == "Completed":
                     return QBrush(QColor("#10B981"))
@@ -283,6 +464,8 @@ class RecordingsTableModel(QAbstractTableModel):
 
         if column == self.COL_CHECK:
             self._items.sort(key=lambda x: x.checked, reverse=reverse)
+        elif column == self.COL_NUM:
+            self._items.sort(key=lambda x: (int(x.camera.number), str(x.recording.start)), reverse=reverse)
         elif column == self.COL_CAMERA:
             self._items.sort(key=lambda x: (int(x.camera.number), x.camera.name), reverse=reverse)
         elif column == self.COL_STREAM:

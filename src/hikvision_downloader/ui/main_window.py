@@ -35,10 +35,10 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QScrollArea,
     QSlider,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
     QTableView,
     QToolButton,
     QVBoxLayout,
@@ -61,12 +61,25 @@ from ..core.models import (
     RecordingDate,
     TrackId,
 )
-from .keychain import delete_nvr_password, get_nvr_password, save_nvr_password
+from .keychain import (
+    delete_nvr_password,
+    get_nvr_credential,
+    get_nvr_password,
+    save_nvr_password,
+)
 from .models import (
+    CameraItem,
+    CamerasTableModel,
     RecordingItem,
     RecordingsTableModel,
     check_disk_space,
     format_size_human,
+)
+from .profiles import (
+    get_saved_hosts,
+    get_saved_usernames,
+    load_profiles,
+    save_profile,
 )
 from .style import DARK_THEME_QSS, LIGHT_THEME_QSS
 from .workers import AuthWorker, DatesWorker, DiscoveryWorker, DownloadWorker, SearchWorker
@@ -85,8 +98,25 @@ def resolve_default_output_dir() -> Path:
     return (Path.home() / "Downloads" / "HikvisionArchive").resolve()
 
 
+class ProfileComboBox(QComboBox):
+    """Editable QComboBox supporting profile selection and standard text access helpers."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+
+    def text(self) -> str:
+        """Return trimmed current text."""
+        return self.currentText().strip()
+
+    def setText(self, text: str) -> None:
+        """Set current text in the combo box editor."""
+        self.setCurrentText(text)
+
+
 class CameraRowWidget(QWidget):
-    """Widget row for a camera inside the control panel list."""
+    """Widget row for a camera inside the control panel list (legacy / utility)."""
 
     def __init__(self, camera: Camera, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -96,8 +126,8 @@ class CameraRowWidget(QWidget):
         self._layout.setContentsMargins(6, 1, 6, 1)
         self._layout.setSpacing(6)
 
-        # Checkbox with Channel Number & Name
-        self.checkbox = QCheckBox(f"CH{int(camera.number):02d}  {camera.name}", self)
+        # Real camera name without CH prefixes
+        self.checkbox = QCheckBox(camera.name, self)
         self.checkbox.setChecked(True)
         self._layout.addWidget(self.checkbox, stretch=1)
 
@@ -149,7 +179,6 @@ class MainWindow(QMainWindow):
         # Session & State
         self._session: requests.Session | None = None
         self._discovered_cameras: dict[CameraNumber, Camera] = {}
-        self._camera_rows: list[CameraRowWidget] = []
         self._discovered_dates: dict[tuple[int, int], list[RecordingDate]] = {}
         self._device_info: dict[str, str] = {}
 
@@ -160,7 +189,8 @@ class MainWindow(QMainWindow):
         self._search_worker: SearchWorker | None = None
         self._download_worker: DownloadWorker | None = None
 
-        # Table Model
+        # Table Models
+        self._cameras_table_model = CamerasTableModel(self)
         self._table_model = RecordingsTableModel(self)
         self._table_model.dataChanged.connect(self._on_table_data_changed)
         self._table_model.modelReset.connect(self._on_table_data_changed)
@@ -177,7 +207,8 @@ class MainWindow(QMainWindow):
         self._build_body_panels()
         self._build_footer_bar()
 
-        # Load saved credentials and initial space check
+        # Load saved profiles, credentials and initial space check
+        self._populate_profile_combos()
         self._load_initial_credentials()
         self._update_space_validation()
 
@@ -221,13 +252,16 @@ class MainWindow(QMainWindow):
         form_layout.setSpacing(8)
         form_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        # Host
+        # Host (Editable ComboBox populated from profiles)
         form_layout.addWidget(QLabel("Host:", self))
-        self.host_input = QLineEdit(self)
-        self.host_input.setPlaceholderText("192.168.1.100")
-        self.host_input.setMaximumWidth(120)
-        self.host_input.setText(NVR_HOST or "")
-        self.host_input.editingFinished.connect(self._on_connection_field_changed)
+        self.host_input = ProfileComboBox(self)
+        host_line_edit = self.host_input.lineEdit()
+        if host_line_edit is not None:
+            host_line_edit.setPlaceholderText("192.168.1.100")
+            host_line_edit.editingFinished.connect(self._auto_lookup_keychain)
+        self.host_input.setMinimumWidth(130)
+        self.host_input.setMaximumWidth(160)
+        self.host_input.currentTextChanged.connect(self._on_host_combo_changed)
         form_layout.addWidget(self.host_input)
 
         # Port
@@ -238,16 +272,19 @@ class MainWindow(QMainWindow):
         self.port_input.setFixedWidth(50)
         self.port_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.port_input.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        self.port_input.editingFinished.connect(self._on_connection_field_changed)
+        self.port_input.editingFinished.connect(self._auto_lookup_keychain)
         form_layout.addWidget(self.port_input)
 
-        # Username
+        # Username (Editable ComboBox populated from profiles)
         form_layout.addWidget(QLabel("User:", self))
-        self.user_input = QLineEdit(self)
-        self.user_input.setPlaceholderText("admin")
+        self.user_input = ProfileComboBox(self)
+        user_line_edit = self.user_input.lineEdit()
+        if user_line_edit is not None:
+            user_line_edit.setPlaceholderText("admin")
+            user_line_edit.editingFinished.connect(self._auto_lookup_keychain)
         self.user_input.setMinimumWidth(115)
-        self.user_input.setText(NVR_USERNAME or "admin")
-        self.user_input.editingFinished.connect(self._on_connection_field_changed)
+        self.user_input.setMaximumWidth(140)
+        self.user_input.currentTextChanged.connect(self._on_user_combo_changed)
         form_layout.addWidget(self.user_input)
 
         # Password
@@ -255,7 +292,7 @@ class MainWindow(QMainWindow):
         self.password_input = QLineEdit(self)
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("••••••••")
-        self.password_input.setMaximumWidth(90)
+        self.password_input.setMaximumWidth(100)
         form_layout.addWidget(self.password_input)
 
         # Remember in Keychain Checkbox
@@ -348,17 +385,16 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(14, 12, 8, 12)
         left_layout.setSpacing(12)
 
-        # 1. Camera Channels & Stream Quality Group
-        left_layout.addWidget(self._build_camera_group())
+        # 1. Cameras & Streams Group
+        left_layout.addWidget(self._build_camera_group(), stretch=1)
 
         # 2. Recording Time Window Group
         left_layout.addWidget(self._build_time_group())
 
-        left_layout.addStretch(1)
-
         # 3. Pinned Search Button at bottom
         self.search_btn = QPushButton("🔍  SEARCH RECORDINGS", self)
         self.search_btn.setObjectName("searchBtn")
+        self.search_btn.setEnabled(False)
         self.search_btn.clicked.connect(self._on_search_clicked)
         left_layout.addWidget(self.search_btn)
 
@@ -412,7 +448,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
 
         # Embedded Section Header
-        header_label = QLabel("CAMERA CHANNELS & STREAM", self)
+        header_label = QLabel("CAMERAS & STREAMS", self)
         header_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #38BDF8; background: transparent; border: none; padding-bottom: 6px;")
         layout.addWidget(header_label)
 
@@ -422,15 +458,15 @@ class MainWindow(QMainWindow):
 
         btn_select_all = QPushButton("Select All", self)
         btn_select_all.setObjectName("secondaryBtn")
-        btn_select_all.clicked.connect(lambda: self._set_all_cameras_checked(True))
+        btn_select_all.clicked.connect(lambda: self._cameras_table_model.select_all(True))
         actions_layout.addWidget(btn_select_all)
 
         btn_deselect_all = QPushButton("Deselect", self)
         btn_deselect_all.setObjectName("secondaryBtn")
-        btn_deselect_all.clicked.connect(lambda: self._set_all_cameras_checked(False))
+        btn_deselect_all.clicked.connect(lambda: self._cameras_table_model.select_all(False))
         actions_layout.addWidget(btn_deselect_all)
 
-        btn_refresh = QPushButton("Refresh Channels", self)
+        btn_refresh = QPushButton("Refresh Cameras", self)
         btn_refresh.setObjectName("secondaryBtn")
         btn_refresh.setMinimumWidth(110)
         btn_refresh.clicked.connect(self._on_refresh_cameras_clicked)
@@ -438,25 +474,45 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(actions_layout)
 
-        # Camera Checklist Container (Scrollable)
-        self.camera_list_container = QWidget(self)
-        self.camera_list_layout = QVBoxLayout(self.camera_list_container)
-        self.camera_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.camera_list_layout.setSpacing(2)
+        # Stacked Widget for Camera Table vs Centered Empty Placeholder
+        self.cameras_stack = QStackedWidget(self)
 
-        self.empty_cam_label = QLabel("No cameras discovered. Click 'Connect' to discover channels.", self)
-        self.empty_cam_label.setStyleSheet("color: #64748B; font-style: italic; padding: 12px;")
-        self.empty_cam_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.camera_list_layout.addWidget(self.empty_cam_label)
+        # Page 0: Centered Placeholder Label
+        placeholder_container = QWidget(self)
+        p_layout = QVBoxLayout(placeholder_container)
+        p_layout.setContentsMargins(12, 24, 12, 24)
+        self.cameras_placeholder_label = QLabel("No cameras discovered. Click 'Connect' to discover cameras.", self)
+        self.cameras_placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cameras_placeholder_label.setWordWrap(True)
+        self.cameras_placeholder_label.setStyleSheet("color: #64748B; font-size: 12px; font-style: italic; padding: 20px;")
+        p_layout.addWidget(self.cameras_placeholder_label)
+        self.cameras_stack.addWidget(placeholder_container)
 
-        self.camera_scroll = QScrollArea(self)
-        self.camera_scroll.setWidgetResizable(True)
-        self.camera_scroll.setWidget(self.camera_list_container)
-        self.camera_scroll.setMinimumHeight(455)
-        layout.addWidget(self.camera_scroll)
+        # Page 1: Camera Table View
+        self.cameras_table = QTableView(self)
+        self.cameras_table.setObjectName("camerasTable")
+        self.cameras_table.setModel(self._cameras_table_model)
+        self.cameras_table.setSortingEnabled(True)
+        self.cameras_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.cameras_table.setAlternatingRowColors(True)
+        self.cameras_table.setShowGrid(False)
+        self.cameras_table.verticalHeader().setVisible(False)
+        self.cameras_table.verticalHeader().setDefaultSectionSize(22)
+        self.cameras_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.cameras_table.horizontalHeader().setStretchLastSection(True)
 
-        # Explicit spacing above stream quality
-        layout.addSpacing(10)
+        self.cameras_table.setColumnWidth(CamerasTableModel.COL_CHECK, 34)
+        self.cameras_table.setColumnWidth(CamerasTableModel.COL_NUM, 40)
+        self.cameras_table.setColumnWidth(CamerasTableModel.COL_NAME, 170)
+        self.cameras_table.setColumnWidth(CamerasTableModel.COL_MODEL, 130)
+        self.cameras_table.horizontalHeader().setSectionResizeMode(CamerasTableModel.COL_CHECK, QHeaderView.ResizeMode.Fixed)
+        self.cameras_table.horizontalHeader().setSectionResizeMode(CamerasTableModel.COL_NUM, QHeaderView.ResizeMode.Fixed)
+        self.cameras_table.horizontalHeader().setSectionResizeMode(CamerasTableModel.COL_NAME, QHeaderView.ResizeMode.Stretch)
+
+        self.cameras_stack.addWidget(self.cameras_table)
+        self.cameras_stack.setCurrentIndex(0)
+
+        layout.addWidget(self.cameras_stack, stretch=1)
 
         # Stream Quality Dropdown
         stream_row = QHBoxLayout()
@@ -466,6 +522,7 @@ class MainWindow(QMainWindow):
 
         self.stream_combo = QComboBox(self)
         self.stream_combo.addItem("HD (Main Stream)", "HD")
+        self.stream_combo.setEnabled(False)
         stream_row.addWidget(self.stream_combo, stretch=1)
         layout.addLayout(stream_row)
 
@@ -668,13 +725,14 @@ class MainWindow(QMainWindow):
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_view.setAlternatingRowColors(True)
         self.table_view.setShowGrid(False)
-        self.table_view.verticalHeader().setVisible(True)
-        self.table_view.verticalHeader().setDefaultSectionSize(26)
+        self.table_view.verticalHeader().setVisible(False)
+        self.table_view.verticalHeader().setDefaultSectionSize(22)
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table_view.horizontalHeader().setStretchLastSection(True)
 
-        # Set specific column widths
-        self.table_view.setColumnWidth(RecordingsTableModel.COL_CHECK, 36)
+        # Set specific column widths ensuring symmetry with left table
+        self.table_view.setColumnWidth(RecordingsTableModel.COL_CHECK, 34)
+        self.table_view.setColumnWidth(RecordingsTableModel.COL_NUM, 40)
         self.table_view.setColumnWidth(RecordingsTableModel.COL_CAMERA, 140)
         self.table_view.setColumnWidth(RecordingsTableModel.COL_STREAM, 65)
         self.table_view.setColumnWidth(RecordingsTableModel.COL_FILENAME, 220)
@@ -682,6 +740,9 @@ class MainWindow(QMainWindow):
         self.table_view.setColumnWidth(RecordingsTableModel.COL_END, 150)
         self.table_view.setColumnWidth(RecordingsTableModel.COL_SIZE, 90)
         self.table_view.setColumnWidth(RecordingsTableModel.COL_STATUS, 100)
+
+        self.table_view.horizontalHeader().setSectionResizeMode(RecordingsTableModel.COL_CHECK, QHeaderView.ResizeMode.Fixed)
+        self.table_view.horizontalHeader().setSectionResizeMode(RecordingsTableModel.COL_NUM, QHeaderView.ResizeMode.Fixed)
 
         layout.addWidget(self.table_view)
 
@@ -770,53 +831,146 @@ class MainWindow(QMainWindow):
                 self.theme_btn.setText("🌙")
 
     # =========================================================================
-    # Credential & Keychain Logic
+    # Profiles & Keychain Logic
     # =========================================================================
 
+    def _populate_profile_combos(self) -> None:
+        """Populate Host and User combo boxes from saved profiles and .env defaults."""
+        hosts = get_saved_hosts()
+        if NVR_HOST and NVR_HOST not in hosts:
+            hosts.insert(0, NVR_HOST)
+
+        self.host_input.blockSignals(True)
+        self.host_input.clear()
+        for h in hosts:
+            self.host_input.addItem(h)
+        if NVR_HOST:
+            self.host_input.setText(NVR_HOST)
+        elif hosts:
+            self.host_input.setText(hosts[0])
+        self.host_input.blockSignals(False)
+
+        current_host = self.host_input.text()
+        users = get_saved_usernames(current_host)
+        default_user = NVR_USERNAME or "admin"
+        if default_user not in users:
+            users.insert(0, default_user)
+
+        self.user_input.blockSignals(True)
+        self.user_input.clear()
+        for u in users:
+            self.user_input.addItem(u)
+        self.user_input.setText(default_user)
+        self.user_input.blockSignals(False)
+
+    def _on_host_combo_changed(self, host_text: str) -> None:
+        """Update usernames dropdown and query keychain when host changes."""
+        clean_host = host_text.strip()
+        if clean_host:
+            profiles = load_profiles()
+            matching = [p for p in profiles if p.host.lower() == clean_host.lower()]
+            if matching:
+                self.port_input.setValue(matching[0].port)
+                # Update users combo
+                users = get_saved_usernames(clean_host)
+                if users:
+                    self.user_input.blockSignals(True)
+                    self.user_input.clear()
+                    for u in users:
+                        self.user_input.addItem(u)
+                    self.user_input.setText(users[0])
+                    self.user_input.blockSignals(False)
+        self._auto_lookup_keychain()
+
+    def _on_user_combo_changed(self, user_text: str) -> None:
+        """Query keychain when username changes."""
+        self._auto_lookup_keychain()
+
     def _load_initial_credentials(self) -> None:
-        host = self.host_input.text().strip()
-        user = self.user_input.text().strip()
+        """Load initial credentials on startup."""
+        host = self.host_input.text()
+        user = self.user_input.text()
         port = self.port_input.value()
 
-        if host and user:
-            saved_pw = get_nvr_password(host, user, port)
-            if saved_pw:
-                self.password_input.setText(saved_pw)
+        if host:
+            try:
+                cred = get_nvr_credential(host, user, port) if user else get_nvr_credential(host, "", port)
+                if cred is not None:
+                    matched_user, password = cred
+                    if matched_user and matched_user != user:
+                        self.user_input.setText(matched_user)
+                    self.password_input.setText(password)
+                    self.remember_cb.setChecked(True)
+                    self.password_input.setToolTip("🔑 Credentials retrieved from OS Keychain")
+                    self.log_message("INFO", f"Loaded stored credentials from OS Keychain for {matched_user or user}@{host}:{port}.")
+                    return
+            except (OSError, RuntimeError, ValueError) as exc:
+                self.log_message("ERROR", f"OS Keychain access failed: {exc}")
+
+        if NVR_PASSWORD:
+            self.password_input.setText(NVR_PASSWORD)
+
+    def _auto_lookup_keychain(self) -> None:
+        """Reactively lookup credentials from OS Keychain on host/user/port field edit."""
+        host = self.host_input.text()
+        user = self.user_input.text()
+        port = self.port_input.value()
+
+        if not host:
+            return
+
+        try:
+            password = get_nvr_password(host, user, port) if user else None
+            if password is not None:
+                self.password_input.setText(password)
                 self.remember_cb.setChecked(True)
-                self.password_input.setToolTip("🔑 Loaded from OS Keychain")
-                self.log_message("INFO", f"Loaded stored credentials from OS Keychain for {host}:{port}.")
-            elif NVR_PASSWORD:
-                self.password_input.setText(NVR_PASSWORD)
+                self.password_input.setToolTip("🔑 Credentials retrieved from OS Keychain")
+                self.log_message("INFO", f"Loaded password from OS Keychain for {user}@{host}:{port}.")
+            else:
+                # Fallback to credential auto-discovery across matching host
+                cred = get_nvr_credential(host, user, port)
+                if cred is not None:
+                    matched_user, matched_pw = cred
+                    if matched_user and matched_user != user:
+                        self.user_input.setText(matched_user)
+                    self.password_input.setText(matched_pw)
+                    self.remember_cb.setChecked(True)
+                    self.password_input.setToolTip("🔑 Credentials retrieved from OS Keychain")
+                    self.log_message("INFO", f"Loaded password from OS Keychain for {matched_user}@{host}:{port}.")
+                else:
+                    self.password_input.clear()
+                    self.password_input.setToolTip("")
+                    self.log_message("DEBUG", f"No keychain password entry found for {user or 'unknown'}@{host}:{port}.")
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.log_message("ERROR", f"OS Keychain access failed: {exc}")
 
     def _on_connection_field_changed(self) -> None:
-        """Reactively lookup credentials from OS Keychain on host/user field edit."""
-        host = self.host_input.text().strip()
-        user = self.user_input.text().strip()
-        port = self.port_input.value()
-
-        if host and user:
-            stored_password = get_nvr_password(host, user, port)
-            if stored_password:
-                self.password_input.setText(stored_password)
-                self.remember_cb.setChecked(True)
-                self.password_input.setToolTip("🔑 Loaded from OS Keychain")
-                self.log_message("INFO", f"Retrieved stored credentials from OS Keychain for {user}@{host}:{port}.")
-            else:
-                self.password_input.setToolTip("")
+        """Backwards-compatible alias for reactive keychain lookup."""
+        self._auto_lookup_keychain()
 
     def _save_credentials_if_checked(self) -> None:
-        host = self.host_input.text().strip()
-        user = self.user_input.text().strip()
+        """Persist successful connection profile and save password in OS Keychain if requested."""
+        host = self.host_input.text()
+        user = self.user_input.text()
         port = self.port_input.value()
         password = self.password_input.text()
 
+        if host and user:
+            save_profile(host, port, user)
+
         if self.remember_cb.isChecked() and host and user and password:
-            if save_nvr_password(host, user, password, port):
-                self.log_message("INFO", "NVR credentials saved securely to OS Keychain.")
-            else:
-                self.log_message("WARN", "Could not persist credentials to OS Keychain.")
+            try:
+                if save_nvr_password(host, user, password, port):
+                    self.log_message("INFO", f"Saved password in OS Keychain for {user}@{host}:{port}.")
+                else:
+                    self.log_message("ERROR", f"OS Keychain access failed: Could not persist credentials for {user}@{host}:{port}")
+            except (OSError, RuntimeError, ValueError) as exc:
+                self.log_message("ERROR", f"OS Keychain access failed: {exc}")
         elif not self.remember_cb.isChecked() and host and user:
-            delete_nvr_password(host, user, port)
+            try:
+                delete_nvr_password(host, user, port)
+            except (OSError, RuntimeError, ValueError) as exc:
+                self.log_message("ERROR", f"OS Keychain access failed: {exc}")
 
     # =========================================================================
     # Logging & Console Output
@@ -826,6 +980,7 @@ class MainWindow(QMainWindow):
         """Append a timestamped log line to the live activity console."""
         timestamp = time.strftime("%H:%M:%S")
         color_map = {
+            "DEBUG": "#64748B",
             "INFO": "#38BDF8",
             "SUCCESS": "#4ADE80",
             "WARN": "#F59E0B",
@@ -854,9 +1009,9 @@ class MainWindow(QMainWindow):
             self._disconnect_session()
             return
 
-        host = self.host_input.text().strip()
+        host = self.host_input.text()
         port = self.port_input.value()
-        username = self.user_input.text().strip()
+        username = self.user_input.text()
         password = self.password_input.text()
 
         if not host:
@@ -898,6 +1053,9 @@ class MainWindow(QMainWindow):
                 "background-color: #064E3B; color: #10B981; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
             )
 
+            # Enable action search button
+            self.search_btn.setEnabled(True)
+
             # Clear focus from input controls and focus search button
             self.host_input.clearFocus()
             self.user_input.clearFocus()
@@ -918,8 +1076,13 @@ class MainWindow(QMainWindow):
             )
             QMessageBox.critical(self, "Authentication Failed", f"Could not authenticate with NVR:\n{message}")
 
+    @property
+    def _camera_rows(self) -> list[CameraItem]:
+        """Convenience property for accessing camera items in the table model."""
+        return self._cameras_table_model.get_items()
+
     def _disconnect_session(self) -> None:
-        """Disconnect active session, stop background workers, and reset UI state."""
+        """Disconnect active session, stop background workers, and perform full state purge."""
         if self._download_worker is not None and self._download_worker.isRunning():
             self._download_worker.cancel()
         if self._search_worker is not None and self._search_worker.isRunning():
@@ -930,28 +1093,29 @@ class MainWindow(QMainWindow):
         if self._dates_worker is not None and self._dates_worker.isRunning():
             self._dates_worker.quit()
             self._dates_worker.wait(100)
+
+        # Clear session and discovered entities
         self._session = None
         self._discovered_cameras.clear()
-        self._camera_rows.clear()
+        self._cameras_table_model.clear()
+        self.cameras_stack.setCurrentIndex(0)
         self._discovered_dates.clear()
         self._device_info.clear()
 
-        # Completely destroy all camera rows in layout and restore empty placeholder
-        while (item := self.camera_list_layout.takeAt(0)) is not None:
-            if w := item.widget():
-                w.deleteLater()
-
-        self.empty_cam_label = QLabel("No cameras discovered. Click 'Connect' to discover channels.", self)
-        self.empty_cam_label.setStyleSheet("color: #64748B; font-style: italic; padding: 12px;")
-        self.empty_cam_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.camera_list_layout.addWidget(self.empty_cam_label)
-        self.empty_cam_label.setVisible(True)
-
-        self._update_stream_options()
+        # Clear recordings table and reset stream options
+        self.stream_combo.clear()
+        self.stream_combo.setEnabled(False)
         self._table_model.clear()
+
+        # Reset summary, progress, and buttons
         self.summary_label.setText("0 segments discovered (0 B) | 0 selected (0 B)")
         self.overall_progress_bar.setValue(0)
         self.progress_readout.setText("[ 0% ]  Idle  |  0.0 Mbps  |  Elapsed: 00:00  |  ETA: --:--")
+        self.start_download_btn.setEnabled(False)
+        self.abort_btn.setEnabled(False)
+        self.search_btn.setEnabled(False)
+
+        # Reset connection button and status badge
         self.connect_btn.setText("Connect")
         self.connect_btn.setProperty("connected", "false")
         self.connect_btn.style().unpolish(self.connect_btn)
@@ -961,7 +1125,13 @@ class MainWindow(QMainWindow):
             "background-color: #334155; color: #94A3B8; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
         )
         self.footer_device_label.setText("Disconnected · Ready")
-        self.log_message("INFO", "Disconnected from NVR session.")
+
+        # Clear password input
+        self.password_input.clear()
+        self.password_input.setToolTip("")
+
+        # Log clean disconnection
+        self.log_message("INFO", "Session disconnected. Ready.")
 
     def _on_refresh_cameras_clicked(self) -> None:
         if self._session is None:
@@ -974,7 +1144,7 @@ class MainWindow(QMainWindow):
         if self._session is None:
             return
 
-        host = self.host_input.text().strip()
+        host = self.host_input.text()
         port = self.port_input.value()
 
         self._discovery_worker = DiscoveryWorker(
@@ -994,7 +1164,7 @@ class MainWindow(QMainWindow):
         if self._session is None:
             return
 
-        host = self.host_input.text().strip()
+        host = self.host_input.text()
 
         self._dates_worker = DatesWorker(
             session=self._session,
@@ -1012,7 +1182,7 @@ class MainWindow(QMainWindow):
             model = self._device_info.get("model") or self._device_info.get("modelName") or "Hikvision NVR"
             fw = self._device_info.get("firmwareVersion") or "Unknown"
             count = len(self._discovered_cameras)
-            self.footer_device_label.setText(f"Model: {model}  |  Firmware: {fw}  |  Active Channels: {count}")
+            self.footer_device_label.setText(f"Model: {model}  |  Firmware: {fw}  |  Active Cameras: {count}")
 
     def _on_dates_discovered(self, dates_by_month: object) -> None:
         if not isinstance(dates_by_month, dict):
@@ -1036,16 +1206,20 @@ class MainWindow(QMainWindow):
 
     def _on_discovery_cameras(self, cameras: dict[CameraNumber, Camera]) -> None:
         self._discovered_cameras = cameras
-        self._rebuild_camera_checklist()
+        self._cameras_table_model.set_cameras(cameras)
+        if len(cameras) > 0:
+            self.cameras_stack.setCurrentIndex(1)
+        else:
+            self.cameras_stack.setCurrentIndex(0)
         self._update_stream_options()
 
         if self._device_info:
             model = self._device_info.get("model") or self._device_info.get("modelName") or "Hikvision NVR"
             fw = self._device_info.get("firmwareVersion") or "Unknown"
-            self.footer_device_label.setText(f"Model: {model}  |  Firmware: {fw}  |  Active Channels: {len(cameras)}")
+            self.footer_device_label.setText(f"Model: {model}  |  Firmware: {fw}  |  Active Cameras: {len(cameras)}")
         elif self.footer_device_label.text() in ("Disconnected · Ready", "") or "Connected:" in self.footer_device_label.text():
-            host = self.host_input.text().strip()
-            self.footer_device_label.setText(f"Connected: {host} ({len(cameras)} Channels)")
+            host = self.host_input.text()
+            self.footer_device_label.setText(f"Connected: {host} ({len(cameras)} Cameras)")
 
     def _update_stream_options(self) -> None:
         """Update stream quality dropdown based on discovered camera tracks."""
@@ -1057,27 +1231,18 @@ class MainWindow(QMainWindow):
             self.stream_combo.addItem("SD (Sub Stream)", "SD")
             if curr == "SD":
                 self.stream_combo.setCurrentIndex(1)
+        self.stream_combo.setEnabled(len(self._discovered_cameras) > 0)
 
     def _rebuild_camera_checklist(self) -> None:
-        for row_widget in self._camera_rows:
-            self.camera_list_layout.removeWidget(row_widget)
-            row_widget.deleteLater()
-        self._camera_rows.clear()
-
-        if not self._discovered_cameras:
-            self.empty_cam_label.setVisible(True)
-            return
-
-        self.empty_cam_label.setVisible(False)
-
-        for _, camera in sorted(self._discovered_cameras.items(), key=lambda x: int(x[0])):
-            row = CameraRowWidget(camera, self.camera_list_container)
-            self.camera_list_layout.addWidget(row)
-            self._camera_rows.append(row)
+        """Refresh camera table model contents."""
+        self._cameras_table_model.set_cameras(self._discovered_cameras)
+        if len(self._discovered_cameras) > 0:
+            self.cameras_stack.setCurrentIndex(1)
+        else:
+            self.cameras_stack.setCurrentIndex(0)
 
     def _set_all_cameras_checked(self, checked: bool) -> None:
-        for row in self._camera_rows:
-            row.checkbox.setChecked(checked)
+        self._cameras_table_model.select_all(checked)
 
     def _apply_time_preset(self, start_hh: str, start_mm: str, end_hh: str, end_mm: str) -> None:
         self.start_hh_combo.setCurrentText(start_hh)
@@ -1107,16 +1272,15 @@ class MainWindow(QMainWindow):
         selected_stream = str(self.stream_combo.currentData() or "HD")
 
         selected_cameras: list[tuple[Camera, str, TrackId]] = []
-        for row in self._camera_rows:
-            if row.is_selected:
-                if selected_stream.upper() == "SD":
-                    track_id = row.camera.sub_track if int(row.camera.sub_track) > 0 else row.camera.main_track
-                else:
-                    track_id = row.camera.main_track
-                selected_cameras.append((row.camera, selected_stream, track_id))
+        for cam in self._cameras_table_model.get_selected_cameras():
+            if selected_stream.upper() == "SD":
+                track_id = cam.sub_track if int(cam.sub_track) > 0 else cam.main_track
+            else:
+                track_id = cam.main_track
+            selected_cameras.append((cam, selected_stream, track_id))
 
         if not selected_cameras:
-            QMessageBox.warning(self, "No Cameras Selected", "Please select at least one camera channel to search.")
+            QMessageBox.warning(self, "No Cameras Selected", "Please select at least one camera to search.")
             return
 
         qdate = self.date_picker.date()
@@ -1133,7 +1297,7 @@ class MainWindow(QMainWindow):
         self.search_btn.setEnabled(False)
         self.start_download_btn.setEnabled(False)
 
-        host = self.host_input.text().strip()
+        host = self.host_input.text()
         port = self.port_input.value()
 
         self._search_worker = SearchWorker(
@@ -1198,7 +1362,9 @@ class MainWindow(QMainWindow):
         self.summary_label.setText(
             f"{total_count} segments discovered ({format_size_human(total_bytes)}) | {selected_count} selected ({format_size_human(selected_bytes)})"
         )
-        self.start_download_btn.setEnabled(selected_count > 0 and (self._download_worker is None or not self._download_worker.isRunning()))
+        self.start_download_btn.setEnabled(
+            selected_count > 0 and self._session is not None and (self._download_worker is None or not self._download_worker.isRunning())
+        )
         self._update_space_validation()
 
     def _update_space_validation(self) -> None:
@@ -1260,7 +1426,7 @@ class MainWindow(QMainWindow):
         self.overall_progress_bar.setValue(0)
         self.progress_readout.setText("[   0% ]  Preparing batch download...  |  0.0 Mbps  |  Elapsed: 00:00  |  ETA: --:--")
 
-        host = self.host_input.text().strip()
+        host = self.host_input.text()
         port = self.port_input.value()
         workers = self.worker_slider.value()
         save_csv = self.csv_manifest_cb.isChecked()

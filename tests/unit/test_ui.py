@@ -1,4 +1,4 @@
-"""Headless unit tests for PySide6 desktop GUI models, workers, keychain, and widgets."""
+"""Headless unit tests for PySide6 desktop GUI models, workers, keychain, profiles, and widgets."""
 
 import os
 import shutil
@@ -28,7 +28,9 @@ from hikvision_downloader.core.models import (
 )
 from hikvision_downloader.ui.keychain import (
     delete_nvr_password,
+    get_nvr_credential,
     get_nvr_password,
+    parse_account_key,
     save_nvr_password,
 )
 from hikvision_downloader.ui.main_window import (
@@ -38,11 +40,20 @@ from hikvision_downloader.ui.main_window import (
     resolve_default_output_dir,
 )
 from hikvision_downloader.ui.models import (
+    CameraItem,
+    CamerasTableModel,
     RecordingItem,
     RecordingsTableModel,
     check_disk_space,
     format_iso_display,
     format_size_human,
+)
+from hikvision_downloader.ui.profiles import (
+    delete_profile,
+    get_saved_hosts,
+    get_saved_usernames,
+    load_profiles,
+    save_profile,
 )
 from hikvision_downloader.ui.workers import (
     AuthWorker,
@@ -142,8 +153,56 @@ def test_resolve_default_output_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 
 
 # =============================================================================
-# 2. Keychain Tests
+# 2. Profiles Storage Tests
 # =============================================================================
+
+
+def test_profiles_load_save_delete(tmp_path: Path) -> None:
+    profile_file = tmp_path / "profiles.json"
+
+    # Initially empty
+    assert load_profiles(profile_file) == []
+    assert get_saved_hosts(profile_file) == []
+    assert get_saved_usernames(file_path=profile_file) == []
+
+    # Save profile 1
+    assert save_profile("192.168.1.100", 80, "admin", file_path=profile_file) is True
+    assert save_profile("192.168.1.101", 8000, "operator", file_path=profile_file) is True
+
+    profiles = load_profiles(profile_file)
+    assert len(profiles) == 2
+    assert profiles[0].host == "192.168.1.101"
+    assert profiles[0].port == 8000
+    assert profiles[0].username == "operator"
+    assert profiles[1].host == "192.168.1.100"
+
+    hosts = get_saved_hosts(profile_file)
+    assert hosts == ["192.168.1.101", "192.168.1.100"]
+
+    users = get_saved_usernames(host="192.168.1.101", file_path=profile_file)
+    assert users == ["operator"]
+
+    # Delete profile
+    assert delete_profile("192.168.1.100", 80, "admin", file_path=profile_file) is True
+    assert len(load_profiles(profile_file)) == 1
+    assert delete_profile("nonexistent", 80, "admin", file_path=profile_file) is False
+
+
+def test_profiles_corrupted_handling(tmp_path: Path) -> None:
+    profile_file = tmp_path / "bad_profiles.json"
+    profile_file.write_text("invalid json content", encoding="utf-8")
+    assert load_profiles(profile_file) == []
+
+
+# =============================================================================
+# 3. Keychain Tests
+# =============================================================================
+
+
+def test_keychain_parse_account_key() -> None:
+    assert parse_account_key("192.168.1.100:8000:admin") == ("192.168.1.100", 8000, "admin")
+    assert parse_account_key("192.168.1.100:admin") == ("192.168.1.100", None, "admin")
+    assert parse_account_key("") is None
 
 
 def test_keychain_save_and_get(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,7 +221,7 @@ def test_keychain_save_and_get(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(keyring, "get_password", mock_get_password)
     monkeypatch.setattr(keyring, "delete_password", mock_delete_password)
 
-    # Save with default port 80
+    # Save with default port 80 -> stored as primary key 192.168.1.100:80:admin
     assert save_nvr_password("192.168.1.100", "admin", "secret123", port=80) is True
     assert get_nvr_password("192.168.1.100", "admin", port=80) == "secret123"
 
@@ -170,9 +229,31 @@ def test_keychain_save_and_get(monkeypatch: pytest.MonkeyPatch) -> None:
     assert save_nvr_password("192.168.1.100", "admin", "secret8000", port=8000) is True
     assert get_nvr_password("192.168.1.100", "admin", port=8000) == "secret8000"
 
-    # Delete
-    assert delete_nvr_password("192.168.1.100", "admin", port=8000) is True
-    assert get_nvr_password("192.168.1.100", "admin", port=8000) == "secret123"  # fallback to host:admin
+    # Fallback matching check
+    store[("hikvision_downloader", "192.168.1.100:admin")] = "fallback_secret"
+    delete_nvr_password("192.168.1.100", "admin", port=8000)
+    store[("hikvision_downloader", "192.168.1.100:admin")] = "fallback_secret"
+    assert get_nvr_password("192.168.1.100", "admin", port=8000) == "fallback_secret"
+
+
+def test_keychain_get_nvr_credential_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    store: dict[tuple[str, str], str] = {
+        ("hikvision_downloader", "192.168.1.100:80:remotebuddy"): "secret_remote",
+    }
+
+    monkeypatch.setattr(keyring, "get_password", lambda s, a: store.get((s, a)))
+
+    class FakeCredential:
+        username = "192.168.1.100:80:remotebuddy"
+        password = "secret_remote"
+
+    monkeypatch.setattr(keyring, "get_credential", lambda s, u: FakeCredential())
+
+    # Exact match
+    assert get_nvr_credential("192.168.1.100", "remotebuddy", 80) == ("remotebuddy", "secret_remote")
+
+    # Mismatched user querying host -> discovers remotebuddy
+    assert get_nvr_credential("192.168.1.100", "admin", 80) == ("remotebuddy", "secret_remote")
 
 
 def test_keychain_error_resilience(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -182,22 +263,83 @@ def test_keychain_error_resilience(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(keyring, "set_password", mock_err)
     monkeypatch.setattr(keyring, "get_password", mock_err)
     monkeypatch.setattr(keyring, "delete_password", mock_err)
+    monkeypatch.setattr(keyring, "get_credential", mock_err)
 
     assert save_nvr_password("192.168.1.100", "admin", "pw") is False
     assert get_nvr_password("192.168.1.100", "admin") is None
+    assert get_nvr_credential("192.168.1.100", "admin") is None
     assert delete_nvr_password("192.168.1.100", "admin") is False
 
 
 # =============================================================================
-# 3. Table Model Tests
+# 4. Table Model Tests
 # =============================================================================
+
+
+def test_cameras_table_model_operations(qapp: QApplication, sample_camera: Camera) -> None:
+    model = CamerasTableModel()
+    assert model.rowCount() == 0
+    assert model.columnCount() == 4
+    assert model.headerData(1, Qt.Orientation.Horizontal) == "#"
+    assert model.headerData(2, Qt.Orientation.Horizontal) == "Camera Name"
+    assert model.headerData(3, Qt.Orientation.Horizontal) == "Hardware Model"
+
+    cam2 = Camera(
+        number=CameraNumber(2),
+        name="Backyard",
+        ip_address="192.168.1.101",
+        model="DS-2CD2043G2-I",
+        main_track=TrackId(201),
+        sub_track=TrackId(202),
+        tracks={"main": TrackId(201), "sub": TrackId(202)},
+    )
+
+    model.set_cameras([sample_camera, cam2])
+    assert model.rowCount() == 2
+    assert len(model.get_selected_cameras()) == 2
+    assert len(model.get_all_cameras()) == 2
+    assert isinstance(model.get_items()[0], CameraItem)
+
+    # Verify column display data - exact name without "CH01" prefix
+    idx_num = model.index(0, CamerasTableModel.COL_NUM)
+    assert model.data(idx_num, Qt.ItemDataRole.DisplayRole) == "1"
+
+    idx_name = model.index(0, CamerasTableModel.COL_NAME)
+    assert model.data(idx_name, Qt.ItemDataRole.DisplayRole) == "MainGate"
+
+    idx_model = model.index(1, CamerasTableModel.COL_MODEL)
+    assert model.data(idx_model, Qt.ItemDataRole.DisplayRole) == "DS-2CD2043G2-I"
+
+    # Toggle checkbox
+    idx_check = model.index(0, CamerasTableModel.COL_CHECK)
+    assert model.data(idx_check, Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
+    model.setData(idx_check, Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
+    assert len(model.get_selected_cameras()) == 1
+
+    # Deselect all and Select all
+    model.select_all(False)
+    assert len(model.get_selected_cameras()) == 0
+    model.select_all(True)
+    assert len(model.get_selected_cameras()) == 2
+
+    # Clear
+    model.clear()
+    assert model.rowCount() == 0
 
 
 def test_table_model_operations(qapp: QApplication, sample_camera: Camera) -> None:
     model = RecordingsTableModel()
     assert model.rowCount() == 0
-    assert model.columnCount() == 8
-    assert model.headerData(1, Qt.Orientation.Horizontal) == "Camera"
+    assert model.columnCount() == 9
+    assert model.headerData(0, Qt.Orientation.Horizontal) == ""
+    assert model.headerData(1, Qt.Orientation.Horizontal) == "#"
+    assert model.headerData(2, Qt.Orientation.Horizontal) == "Camera"
+    assert model.headerData(3, Qt.Orientation.Horizontal) == "Stream"
+    assert model.headerData(4, Qt.Orientation.Horizontal) == "File Name"
+    assert model.headerData(5, Qt.Orientation.Horizontal) == "Start Time"
+    assert model.headerData(6, Qt.Orientation.Horizontal) == "End Time"
+    assert model.headerData(7, Qt.Orientation.Horizontal) == "Size"
+    assert model.headerData(8, Qt.Orientation.Horizontal) == "Status"
 
     rec1 = Recording(
         start=ISODatetimeStr("2026-10-02T10:00:00Z"),
@@ -227,9 +369,15 @@ def test_table_model_operations(qapp: QApplication, sample_camera: Camera) -> No
     assert model.headerData(0, Qt.Orientation.Vertical) == "1"
     assert model.headerData(1, Qt.Orientation.Vertical) == "2"
 
-    # Data check
+    # Data check - Row 0
+    idx_num = model.index(0, RecordingsTableModel.COL_NUM)
+    assert model.data(idx_num, Qt.ItemDataRole.DisplayRole) == "1"
+
     idx_cam = model.index(0, RecordingsTableModel.COL_CAMERA)
-    assert model.data(idx_cam, Qt.ItemDataRole.DisplayRole) == "D1 MainGate"
+    assert model.data(idx_cam, Qt.ItemDataRole.DisplayRole) == "MainGate"
+
+    idx_stream = model.index(0, RecordingsTableModel.COL_STREAM)
+    assert model.data(idx_stream, Qt.ItemDataRole.DisplayRole) == "HD"
 
     idx_check = model.index(0, RecordingsTableModel.COL_CHECK)
     assert model.data(idx_check, Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
@@ -264,7 +412,7 @@ def test_table_model_operations(qapp: QApplication, sample_camera: Camera) -> No
 
 
 # =============================================================================
-# 4. Worker Signal Tests
+# 5. Worker Signal Tests
 # =============================================================================
 
 
@@ -420,7 +568,7 @@ def test_download_worker(
 
 
 # =============================================================================
-# 5. UI Widgets & Window Smoke Tests
+# 6. UI Widgets & Window Smoke Tests
 # =============================================================================
 
 
@@ -428,7 +576,7 @@ def test_camera_row_widget(qapp: QApplication, sample_camera: Camera) -> None:
     widget = CameraRowWidget(sample_camera)
     assert widget.objectName() == "cameraRow"
     assert widget.is_selected is True
-    assert widget.checkbox.text() == "CH01  MainGate"
+    assert widget.checkbox.text() == "MainGate"
 
     widget.checkbox.setChecked(False)
     assert widget.is_selected is False
@@ -444,7 +592,7 @@ def test_camera_row_widget(qapp: QApplication, sample_camera: Camera) -> None:
         tracks={"main": TrackId(301), "sub": TrackId(302)},
     )
     widget_model = CameraRowWidget(cam_with_model)
-    assert widget_model.checkbox.text() == "CH03  Lobby"
+    assert widget_model.checkbox.text() == "Lobby"
     assert widget_model.findChild(QLabel) is not None
 
 
@@ -458,21 +606,34 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     assert window.start_mm_combo.width() == 56
     assert window.left_panel.minimumWidth() >= 410
     assert window.main_splitter.isCollapsible(0) is False
-    assert window.camera_scroll.minimumHeight() == 455
+    assert window.cameras_table is not None
+    assert window.cameras_table.verticalHeader().isVisible() is False
+    assert window.cameras_table.verticalHeader().defaultSectionSize() == 22
+    assert window.cameras_table.isSortingEnabled() is True
+    assert window.table_view.verticalHeader().isVisible() is False
+    assert window.table_view.verticalHeader().defaultSectionSize() == 22
     assert window.minimumWidth() == 1200
     assert window.minimumHeight() == 820
     assert window.status_badge.maximumHeight() == 28
     assert window.theme_btn.width() == 36
     assert window.theme_btn.height() == 28
     assert window.worker_slider.value() >= 1
-    assert window.stream_combo.count() == 1
+    assert window.stream_combo.isEnabled() is False
+    assert window.search_btn.isEnabled() is False
     assert window.footer_device_label.text() == "Disconnected · Ready"
     assert ARIVEDHA_LOGO_SVG_PATH.exists()
+
+    # Initial cameras stack shows placeholder
+    assert window.cameras_stack.currentIndex() == 0
+    assert "No cameras discovered" in window.cameras_placeholder_label.text()
 
     # Populate camera checklist
     window._on_discovery_cameras({CameraNumber(1): sample_camera})
     assert len(window._camera_rows) == 1
-    assert window._camera_rows[0].checkbox.text() == "CH01  MainGate"
+    assert window._camera_rows[0].display_name == "MainGate"
+    assert window.cameras_table.model().rowCount() == 1
+    assert window.cameras_stack.currentIndex() == 1
+    assert window.stream_combo.isEnabled() is True
     assert window.stream_combo.count() == 2  # Has HD and SD
 
     # Deselect all cameras check
@@ -485,6 +646,7 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     window._on_device_info_discovered({"model": "DS-7608NI-K2", "firmwareVersion": "V4.30.060"})
     assert "Model: DS-7608NI-K2" in window.footer_device_label.text()
     assert "Firmware: V4.30.060" in window.footer_device_label.text()
+    assert "Active Cameras: 1" in window.footer_device_label.text()
 
     # Theme toggle
     window._toggle_theme()
@@ -503,10 +665,15 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     window._trigger_dates_discovery = MagicMock()
     window._on_auth_finished(True, "Connected", requests.Session())
     assert window.connect_btn.text() == "Disconnect"
+    assert window.search_btn.isEnabled() is True
+
     window._disconnect_session()
     assert window.connect_btn.text() == "Connect"
     assert window._session is None
     assert window.footer_device_label.text() == "Disconnected · Ready"
+    assert window.cameras_stack.currentIndex() == 0
+    assert window.search_btn.isEnabled() is False
+    assert window.stream_combo.isEnabled() is False
 
     # Calendar dates highlight
     sample_dates = {(2026, 10): [RecordingDate(year=2026, month=10, day=1), RecordingDate(year=2026, month=10, day=2)]}
@@ -527,16 +694,42 @@ def test_keychain_reactive_autofill(qapp: QApplication, monkeypatch: pytest.Monk
         "hikvision_downloader.ui.main_window.get_nvr_password",
         lambda host, user, port: "keychain_secret" if host == "192.168.1.200" and user == "admin" else None,
     )
+    monkeypatch.setattr(
+        "hikvision_downloader.ui.main_window.get_nvr_credential",
+        lambda host, user, port: ("admin", "keychain_secret") if host == "192.168.1.200" else None,
+    )
 
     window = MainWindow()
     window.host_input.setText("192.168.1.200")
     window.user_input.setText("admin")
     window.port_input.setValue(80)
-    window._on_connection_field_changed()
+    window._auto_lookup_keychain()
 
     assert window.password_input.text() == "keychain_secret"
     assert window.remember_cb.isChecked() is True
-    assert "Loaded from OS Keychain" in window.password_input.toolTip()
+    assert "Credentials retrieved from OS Keychain" in window.password_input.toolTip()
+
+    # Test username auto-correction when keychain has a different username
+    monkeypatch.setattr(
+        "hikvision_downloader.ui.main_window.get_nvr_password",
+        lambda host, user, port: None,
+    )
+    monkeypatch.setattr(
+        "hikvision_downloader.ui.main_window.get_nvr_credential",
+        lambda host, user, port: ("remotebuddy", "remotebuddy_secret") if host == "192.168.1.200" else None,
+    )
+    window.user_input.setText("admin")
+    window._auto_lookup_keychain()
+    assert window.user_input.text() == "remotebuddy"
+    assert window.password_input.text() == "remotebuddy_secret"
+
+    # Test not found clears password
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_password", lambda h, u, p: None)
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_credential", lambda h, u, p: None)
+    window.host_input.setText("192.168.1.250")
+    window._auto_lookup_keychain()
+    assert window.password_input.text() == ""
+    assert window.password_input.toolTip() == ""
 
 
 def test_disconnect_session_complete_purge(qapp: QApplication, sample_camera: Camera) -> None:
@@ -552,17 +745,25 @@ def test_disconnect_session_complete_purge(qapp: QApplication, sample_camera: Ca
     )
     window._on_discovery_cameras({CameraNumber(1): sample_camera, CameraNumber(2): cam2})
     assert len(window._camera_rows) == 2
-    assert window.empty_cam_label.isHidden() is True
+    assert window.cameras_table.model().rowCount() == 2
+    assert window.cameras_stack.currentIndex() == 1
+
+    # Emulate active password and search
+    window.password_input.setText("temp_pass")
 
     # Disconnect session
     window._disconnect_session()
     assert len(window._camera_rows) == 0
-    assert window.empty_cam_label.isHidden() is False
-    assert window.empty_cam_label.text() == "No cameras discovered. Click 'Connect' to discover channels."
+    assert window.cameras_table.model().rowCount() == 0
+    assert window.cameras_stack.currentIndex() == 0
     assert window.summary_label.text() == "0 segments discovered (0 B) | 0 selected (0 B)"
     assert window.overall_progress_bar.value() == 0
     assert "Idle" in window.progress_readout.text()
     assert window.footer_device_label.text() == "Disconnected · Ready"
+    assert window.password_input.text() == ""
+    assert window.search_btn.isEnabled() is False
+    assert window.start_download_btn.isEnabled() is False
+    assert window.stream_combo.isEnabled() is False
 
 
 def test_console_3tier_hierarchy_and_progress(qapp: QApplication) -> None:
