@@ -10,7 +10,7 @@ import keyring
 import keyring.errors
 import pytest
 import requests
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QSettings, Qt
 from PySide6.QtWidgets import QApplication, QLabel
 
 # Guarantee headless offscreen Qt execution for offline test environments
@@ -28,6 +28,7 @@ from hikvision_downloader.core.models import (
 )
 from hikvision_downloader.ui.keychain import (
     delete_nvr_password,
+    format_account_key,
     get_nvr_credential,
     get_nvr_password,
     parse_account_key,
@@ -37,6 +38,7 @@ from hikvision_downloader.ui.main_window import (
     ARIVEDHA_LOGO_SVG_PATH,
     CameraRowWidget,
     MainWindow,
+    ProfileComboBox,
     resolve_default_output_dir,
 )
 from hikvision_downloader.ui.models import (
@@ -48,12 +50,13 @@ from hikvision_downloader.ui.models import (
     format_iso_display,
     format_size_human,
 )
-from hikvision_downloader.ui.profiles import (
-    delete_profile,
-    get_saved_hosts,
-    get_saved_usernames,
-    load_profiles,
-    save_profile,
+from hikvision_downloader.ui.settings import (
+    ProfileMetadata,
+    delete_profile_from_settings,
+    get_saved_hosts_from_settings,
+    get_saved_usernames_from_settings,
+    load_profiles_from_settings,
+    save_profile_to_settings,
 )
 from hikvision_downloader.ui.workers import (
     AuthWorker,
@@ -153,45 +156,48 @@ def test_resolve_default_output_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 
 
 # =============================================================================
-# 2. Profiles Storage Tests
+# 2. QSettings Storage Tests (No profiles.json)
 # =============================================================================
 
 
-def test_profiles_load_save_delete(tmp_path: Path) -> None:
-    profile_file = tmp_path / "profiles.json"
+def test_settings_load_save_delete(tmp_path: Path) -> None:
+    test_conf = tmp_path / "test_settings.ini"
+    test_settings = QSettings(str(test_conf), QSettings.Format.IniFormat)
 
     # Initially empty
-    assert load_profiles(profile_file) == []
-    assert get_saved_hosts(profile_file) == []
-    assert get_saved_usernames(file_path=profile_file) == []
+    assert load_profiles_from_settings(test_settings) == []
+    assert get_saved_hosts_from_settings(test_settings) == []
+    assert get_saved_usernames_from_settings(settings=test_settings) == []
 
     # Save profile 1
-    assert save_profile("192.168.1.100", 80, "admin", file_path=profile_file) is True
-    assert save_profile("192.168.1.101", 8000, "operator", file_path=profile_file) is True
+    assert save_profile_to_settings("192.168.1.100", 80, "admin", settings=test_settings) is True
+    assert save_profile_to_settings("192.168.1.101", 8000, "operator", settings=test_settings) is True
 
-    profiles = load_profiles(profile_file)
+    profiles = load_profiles_from_settings(test_settings)
     assert len(profiles) == 2
+    assert isinstance(profiles[0], ProfileMetadata)
     assert profiles[0].host == "192.168.1.101"
     assert profiles[0].port == 8000
     assert profiles[0].username == "operator"
     assert profiles[1].host == "192.168.1.100"
 
-    hosts = get_saved_hosts(profile_file)
+    hosts = get_saved_hosts_from_settings(test_settings)
     assert hosts == ["192.168.1.101", "192.168.1.100"]
 
-    users = get_saved_usernames(host="192.168.1.101", file_path=profile_file)
+    users = get_saved_usernames_from_settings(host="192.168.1.101", settings=test_settings)
     assert users == ["operator"]
 
     # Delete profile
-    assert delete_profile("192.168.1.100", 80, "admin", file_path=profile_file) is True
-    assert len(load_profiles(profile_file)) == 1
-    assert delete_profile("nonexistent", 80, "admin", file_path=profile_file) is False
+    assert delete_profile_from_settings("192.168.1.100", 80, "admin", settings=test_settings) is True
+    assert len(load_profiles_from_settings(test_settings)) == 1
+    assert delete_profile_from_settings("nonexistent", 80, "admin", settings=test_settings) is False
 
 
-def test_profiles_corrupted_handling(tmp_path: Path) -> None:
-    profile_file = tmp_path / "bad_profiles.json"
-    profile_file.write_text("invalid json content", encoding="utf-8")
-    assert load_profiles(profile_file) == []
+def test_settings_corrupted_handling(tmp_path: Path) -> None:
+    test_conf = tmp_path / "test_bad.ini"
+    test_settings = QSettings(str(test_conf), QSettings.Format.IniFormat)
+    test_settings.setValue("profiles_metadata", "invalid json content")
+    assert load_profiles_from_settings(test_settings) == []
 
 
 # =============================================================================
@@ -200,9 +206,11 @@ def test_profiles_corrupted_handling(tmp_path: Path) -> None:
 
 
 def test_keychain_parse_account_key() -> None:
-    assert parse_account_key("192.168.1.100:8000:admin") == ("192.168.1.100", 8000, "admin")
-    assert parse_account_key("192.168.1.100:admin") == ("192.168.1.100", None, "admin")
+    assert parse_account_key("admin@192.168.1.100:8000") == ("admin", "192.168.1.100", 8000)
+    assert parse_account_key("admin@192.168.1.100") == ("admin", "192.168.1.100", 80)
+    assert parse_account_key("192.168.1.100:8000:admin") == ("admin", "192.168.1.100", 8000)
     assert parse_account_key("") is None
+    assert format_account_key("admin", "192.168.1.100", 80) == "admin@192.168.1.100:80"
 
 
 def test_keychain_save_and_get(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,7 +229,7 @@ def test_keychain_save_and_get(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(keyring, "get_password", mock_get_password)
     monkeypatch.setattr(keyring, "delete_password", mock_delete_password)
 
-    # Save with default port 80 -> stored as primary key 192.168.1.100:80:admin
+    # Save with default port 80 -> stored as primary key admin@192.168.1.100:80
     assert save_nvr_password("192.168.1.100", "admin", "secret123", port=80) is True
     assert get_nvr_password("192.168.1.100", "admin", port=80) == "secret123"
 
@@ -230,21 +238,21 @@ def test_keychain_save_and_get(monkeypatch: pytest.MonkeyPatch) -> None:
     assert get_nvr_password("192.168.1.100", "admin", port=8000) == "secret8000"
 
     # Fallback matching check
-    store[("hikvision_downloader", "192.168.1.100:admin")] = "fallback_secret"
+    store[("hikvision_downloader", "admin@192.168.1.100:80")] = "fallback_secret"
     delete_nvr_password("192.168.1.100", "admin", port=8000)
-    store[("hikvision_downloader", "192.168.1.100:admin")] = "fallback_secret"
+    store[("hikvision_downloader", "admin@192.168.1.100:80")] = "fallback_secret"
     assert get_nvr_password("192.168.1.100", "admin", port=8000) == "fallback_secret"
 
 
 def test_keychain_get_nvr_credential_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     store: dict[tuple[str, str], str] = {
-        ("hikvision_downloader", "192.168.1.100:80:remotebuddy"): "secret_remote",
+        ("hikvision_downloader", "remotebuddy@192.168.1.100:80"): "secret_remote",
     }
 
     monkeypatch.setattr(keyring, "get_password", lambda s, a: store.get((s, a)))
 
     class FakeCredential:
-        username = "192.168.1.100:80:remotebuddy"
+        username = "remotebuddy@192.168.1.100:80"
         password = "secret_remote"
 
     monkeypatch.setattr(keyring, "get_credential", lambda s, u: FakeCredential())
@@ -622,6 +630,8 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     assert window.search_btn.isEnabled() is False
     assert window.footer_device_label.text() == "Disconnected · Ready"
     assert ARIVEDHA_LOGO_SVG_PATH.exists()
+    assert window.discovered_badge.text() == "0 Segments Discovered · 0 B"
+    assert window.selected_badge.text() == "0 Selected · 0 B"
 
     # Initial cameras stack shows placeholder
     assert window.cameras_stack.currentIndex() == 0
@@ -707,9 +717,9 @@ def test_keychain_reactive_autofill(qapp: QApplication, monkeypatch: pytest.Monk
 
     assert window.password_input.text() == "keychain_secret"
     assert window.remember_cb.isChecked() is True
-    assert "Credentials retrieved from OS Keychain" in window.password_input.toolTip()
+    assert "Retrieved from OS Keychain" in window.password_input.toolTip()
 
-    # Test username auto-correction when keychain has a different username
+    # Test username discovery when host changes with blank user
     monkeypatch.setattr(
         "hikvision_downloader.ui.main_window.get_nvr_password",
         lambda host, user, port: None,
@@ -718,22 +728,28 @@ def test_keychain_reactive_autofill(qapp: QApplication, monkeypatch: pytest.Monk
         "hikvision_downloader.ui.main_window.get_nvr_credential",
         lambda host, user, port: ("remotebuddy", "remotebuddy_secret") if host == "192.168.1.200" else None,
     )
-    window.user_input.setText("admin")
-    window._auto_lookup_keychain()
+    window.user_input.setText("")
+    window._auto_lookup_keychain(allow_user_autodiscovery=True)
     assert window.user_input.text() == "remotebuddy"
     assert window.password_input.text() == "remotebuddy_secret"
+
+    # Test typing user manually does not overwrite with autodiscovery
+    window.user_input.setText("customuser")
+    window._auto_lookup_keychain(allow_user_autodiscovery=False)
+    assert window.user_input.text() == "customuser"
+    assert window.password_input.text() == ""
 
     # Test not found clears password
     monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_password", lambda h, u, p: None)
     monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_credential", lambda h, u, p: None)
     window.host_input.setText("192.168.1.250")
-    window._auto_lookup_keychain()
+    window._auto_lookup_keychain(allow_user_autodiscovery=True)
     assert window.password_input.text() == ""
     assert window.password_input.toolTip() == ""
 
 
 def test_disconnect_session_complete_purge(qapp: QApplication, sample_camera: Camera) -> None:
-    """Test complete purge of camera items, table rows, and counters on session disconnect."""
+    """Test complete purge of camera items, table rows, counters, console, and inputs on session disconnect."""
     window = MainWindow()
     cam2 = Camera(
         number=CameraNumber(2),
@@ -748,22 +764,65 @@ def test_disconnect_session_complete_purge(qapp: QApplication, sample_camera: Ca
     assert window.cameras_table.model().rowCount() == 2
     assert window.cameras_stack.currentIndex() == 1
 
-    # Emulate active password and search
+    # Emulate active inputs, time presets, log console, and password
+    window.host_input.setText("192.168.1.100")
+    window.user_input.setText("admin")
+    window.port_input.setValue(8000)
     window.password_input.setText("temp_pass")
+    window.start_hh_combo.setCurrentText("08")
+    window.end_hh_combo.setCurrentText("12")
+    window.log_message("INFO", "Active session logging...")
+    assert "Active session logging..." in window.console_log.toPlainText()
 
     # Disconnect session
     window._disconnect_session()
     assert len(window._camera_rows) == 0
     assert window.cameras_table.model().rowCount() == 0
     assert window.cameras_stack.currentIndex() == 0
-    assert window.summary_label.text() == "0 segments discovered (0 B) | 0 selected (0 B)"
+    assert window.discovered_badge.text() == "0 Segments Discovered · 0 B"
+    assert window.selected_badge.text() == "0 Selected · 0 B"
     assert window.overall_progress_bar.value() == 0
     assert "Idle" in window.progress_readout.text()
     assert window.footer_device_label.text() == "Disconnected · Ready"
+    assert window.host_input.text() == ""
+    assert window.user_input.text() == ""
+    assert window.port_input.value() == 80
     assert window.password_input.text() == ""
+    assert window.start_hh_combo.currentText() == "00"
+    assert window.start_mm_combo.currentText() == "00"
+    assert window.end_hh_combo.currentText() == "23"
+    assert window.end_mm_combo.currentText() == "59"
+    assert window.console_log.toPlainText() == ""
     assert window.search_btn.isEnabled() is False
     assert window.start_download_btn.isEnabled() is False
     assert window.stream_combo.isEnabled() is False
+
+
+def test_user_input_can_be_cleared_without_autofill_recursion(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that deleting or clearing username does not get auto-overwritten by keychain host discovery."""
+    monkeypatch.setattr(
+        "hikvision_downloader.ui.main_window.get_nvr_password",
+        lambda host, user, port: "admin_pass" if user == "admin" else None,
+    )
+    monkeypatch.setattr(
+        "hikvision_downloader.ui.main_window.get_nvr_credential",
+        lambda host, user, port: ("admin", "admin_pass") if host == "192.168.1.100" else None,
+    )
+
+    window = MainWindow()
+    window.host_input.setText("192.168.1.100")
+    window.user_input.setText("admin")
+    window._auto_lookup_keychain(allow_user_autodiscovery=False)
+    assert window.password_input.text() == "admin_pass"
+
+    # User explicitly deletes the username
+    window.user_input.setText("")
+    window._auto_lookup_keychain(allow_user_autodiscovery=False)
+
+    # Username MUST remain empty and password cleared, not restored to 'admin'
+    assert window.user_input.text() == ""
+    assert window.password_input.text() == ""
+
 
 
 def test_console_3tier_hierarchy_and_progress(qapp: QApplication) -> None:
@@ -790,3 +849,158 @@ def test_console_3tier_hierarchy_and_progress(qapp: QApplication) -> None:
     assert window.overall_progress_bar.value() == 25  # (0 + 0.5) / 2 = 25%
     assert "ch01_20261002_100000.mp4" in window.progress_readout.text()
     assert "24.5 Mbps" in window.progress_readout.text()
+
+
+def test_twin_summary_badges_reactivity(qapp: QApplication, sample_camera: Camera) -> None:
+    """Test twin high-contrast badges update dynamically when table rows change."""
+    window = MainWindow()
+
+    rec1 = Recording(
+        start=ISODatetimeStr("2026-10-02T10:00:00Z"),
+        end=ISODatetimeStr("2026-10-02T10:15:00Z"),
+        name="ch01_20261002_100000.mp4",
+        size_bytes=ByteCount(100 * 1024 * 1024),
+        playback_uri="rtsp://192.168.1.100/1",
+    )
+    rec2 = Recording(
+        start=ISODatetimeStr("2026-10-02T10:15:00Z"),
+        end=ISODatetimeStr("2026-10-02T10:30:00Z"),
+        name="ch01_20261002_101500.mp4",
+        size_bytes=ByteCount(200 * 1024 * 1024),
+        playback_uri="rtsp://192.168.1.100/2",
+    )
+
+    items = [
+        RecordingItem(recording=rec1, camera=sample_camera, stream="HD", track_id=TrackId(101), checked=True),
+        RecordingItem(recording=rec2, camera=sample_camera, stream="HD", track_id=TrackId(101), checked=True),
+    ]
+
+    window._table_model.set_recordings(items)
+    assert window.discovered_badge.text() == "2 Segments Discovered · 300.0 MB"
+    assert window.selected_badge.text() == "✓ 2 Selected · 300.0 MB"
+    assert "38BDF8" in window.selected_badge.styleSheet()
+
+    # Deselect all
+    window._table_model.select_all(False)
+    assert window.discovered_badge.text() == "2 Segments Discovered · 300.0 MB"
+    assert window.selected_badge.text() == "0 Selected · 0 B"
+    assert "64748B" in window.selected_badge.styleSheet()
+
+    # Select 1 item
+    idx_check = window._table_model.index(0, RecordingsTableModel.COL_CHECK)
+    window._table_model.setData(idx_check, Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole)
+    assert window.discovered_badge.text() == "2 Segments Discovered · 300.0 MB"
+    assert window.selected_badge.text() == "✓ 1 Selected · 100.0 MB"
+    assert "38BDF8" in window.selected_badge.styleSheet()
+
+
+def test_context_menu_credential_removal(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test removing stored profile and OS Keychain credentials via context menu action."""
+    deleted_keychain: list[tuple[str, str, int]] = []
+    deleted_settings: list[tuple[str, int, str]] = []
+
+    def mock_delete_pw(host: str, user: str, port: int) -> bool:
+        deleted_keychain.append((host, user, port))
+        return True
+
+    def mock_delete_prof(host: str, port: int, user: str) -> bool:
+        deleted_settings.append((host, port, user))
+        return True
+
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.delete_nvr_password", mock_delete_pw)
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.delete_profile_from_settings", mock_delete_prof)
+
+    window = MainWindow()
+    window.host_input.setText("192.168.1.150")
+    window.user_input.setText("admin")
+    window.port_input.setValue(8000)
+    window.password_input.setText("mypassword")
+    window.password_input.setToolTip("🔑 Retrieved from OS Keychain")
+
+    window._remove_current_profile_and_credentials()
+
+    assert len(deleted_keychain) == 1
+    assert deleted_keychain[0] == ("192.168.1.150", "admin", 8000)
+    assert len(deleted_settings) == 1
+    assert deleted_settings[0] == ("192.168.1.150", 8000, "admin")
+    assert window.password_input.text() == ""
+    assert window.password_input.toolTip() == ""
+
+
+def test_profile_combobox_dynamic_popup_callback(qapp: QApplication) -> None:
+    """Test ProfileComboBox executes popup callback before opening dropdown."""
+    cb = ProfileComboBox()
+    called: list[bool] = []
+    cb.set_popup_callback(lambda: called.append(True))
+    cb.showPopup()
+    assert len(called) == 1
+
+
+def test_dropdown_dynamic_refresh_and_keychain_loading_after_disconnect(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that after disconnect, clicking dropdown refreshes items and selecting populates keychain password."""
+    s = QSettings("Arivedha", "HikVisionDownloader")
+    s.clear()
+    save_profile_to_settings("192.168.1.64", 80, "admin", settings=s)
+    save_profile_to_settings("192.168.1.75", 8000, "operator", settings=s)
+
+    keychain_store = {
+        ("192.168.1.64", "admin", 80): "admin_secret_pass",
+        ("192.168.1.75", "operator", 8000): "operator_secret_pass",
+    }
+
+    monkeypatch.setattr(
+        "hikvision_downloader.ui.main_window.get_nvr_password",
+        lambda h, u, p: keychain_store.get((h, u, p)),
+    )
+    monkeypatch.setattr(
+        "hikvision_downloader.ui.main_window.get_nvr_credential",
+        lambda h, u, p: (u or "admin", keychain_store.get((h, u or "admin", p))),
+    )
+
+    window = MainWindow()
+
+    # Emulate active state then disconnect
+    window._disconnect_session()
+    assert window.host_input.text() == ""
+    assert window.user_input.text() == ""
+    assert window.password_input.text() == ""
+    assert window.host_input.count() == 0
+
+    # User clicks right-side host dropdown (triggers showPopup)
+    window.host_input.showPopup()
+    assert window.host_input.count() >= 2
+    items = [window.host_input.itemText(i) for i in range(window.host_input.count())]
+    assert "192.168.1.75" in items
+    assert "192.168.1.64" in items
+
+    # User selects 192.168.1.75 from dropdown
+    idx = items.index("192.168.1.75")
+    window.host_input.setCurrentIndex(idx)
+    window.host_input.activated.emit(idx)
+
+    # Verify host, port, user and password auto-filled immediately from Keychain
+    assert window.host_input.text() == "192.168.1.75"
+    assert window.port_input.value() == 8000
+    assert window.user_input.text() == "operator"
+    assert window.password_input.text() == "operator_secret_pass"
+    assert window.password_input.toolTip() == "🔑 Retrieved from OS Keychain"
+
+    # User clicks right-side user dropdown
+    window.user_input.showPopup()
+    user_items = [window.user_input.itemText(i) for i in range(window.user_input.count())]
+    assert "operator" in user_items
+
+    # Selecting user from user dropdown
+    user_idx = user_items.index("operator")
+    window.user_input.setCurrentIndex(user_idx)
+    window.user_input.activated.emit(user_idx)
+    assert window.password_input.text() == "operator_secret_pass"
+
+    # Cleanup
+    s.clear()
+
+
+

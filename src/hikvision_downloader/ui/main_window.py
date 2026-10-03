@@ -3,14 +3,16 @@
 import os
 import sys
 import time
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
 import requests
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QPoint, Qt
 from PySide6.QtGui import (
     QCloseEvent,
     QColor,
+    QCursor,
     QFont,
     QFontDatabase,
     QIcon,
@@ -31,6 +33,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -75,11 +78,14 @@ from .models import (
     check_disk_space,
     format_size_human,
 )
-from .profiles import (
-    get_saved_hosts,
-    get_saved_usernames,
-    load_profiles,
-    save_profile,
+from .settings import (
+    delete_profile_from_settings,
+    get_saved_hosts_from_settings,
+    get_saved_usernames_from_settings,
+    load_profiles_from_settings,
+    restore_window_geometry,
+    save_profile_to_settings,
+    save_window_geometry,
 )
 from .style import DARK_THEME_QSS, LIGHT_THEME_QSS
 from .workers import AuthWorker, DatesWorker, DiscoveryWorker, DownloadWorker, SearchWorker
@@ -99,12 +105,23 @@ def resolve_default_output_dir() -> Path:
 
 
 class ProfileComboBox(QComboBox):
-    """Editable QComboBox supporting profile selection and standard text access helpers."""
+    """Editable QComboBox supporting dynamic popup refresh and profile selection."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setEditable(True)
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._popup_callback: Callable[[], None] | None = None
+
+    def set_popup_callback(self, callback: Callable[[], None]) -> None:
+        """Set a callback to dynamically refresh items before showing the popup menu."""
+        self._popup_callback = callback
+
+    def showPopup(self) -> None:
+        """Dynamically execute popup callback to load fresh items before displaying popup."""
+        if self._popup_callback is not None:
+            self._popup_callback()
+        super().showPopup()
 
     def text(self) -> str:
         """Return trimmed current text."""
@@ -160,6 +177,7 @@ class MainWindow(QMainWindow):
         else:
             self.resize(1340, 920)
         self.setMinimumSize(1200, 820)
+        restore_window_geometry(self)
 
         # Theme state
         self._is_dark_theme: bool = True
@@ -252,15 +270,21 @@ class MainWindow(QMainWindow):
         form_layout.setSpacing(8)
         form_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        # Host (Editable ComboBox populated from profiles)
+        # Host (Editable ComboBox populated from QSettings)
         form_layout.addWidget(QLabel("Host:", self))
         self.host_input = ProfileComboBox(self)
+        self.host_input.set_popup_callback(self._refresh_host_dropdown_items)
+        self.host_input.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.host_input.customContextMenuRequested.connect(self._show_credential_context_menu)
         host_line_edit = self.host_input.lineEdit()
         if host_line_edit is not None:
             host_line_edit.setPlaceholderText("192.168.1.100")
-            host_line_edit.editingFinished.connect(self._auto_lookup_keychain)
+            host_line_edit.editingFinished.connect(lambda: self._auto_lookup_keychain(allow_user_autodiscovery=True))
+            host_line_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            host_line_edit.customContextMenuRequested.connect(self._show_credential_context_menu)
         self.host_input.setMinimumWidth(130)
         self.host_input.setMaximumWidth(160)
+        self.host_input.activated.connect(self._on_host_dropdown_selected)
         self.host_input.currentTextChanged.connect(self._on_host_combo_changed)
         form_layout.addWidget(self.host_input)
 
@@ -272,18 +296,24 @@ class MainWindow(QMainWindow):
         self.port_input.setFixedWidth(50)
         self.port_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.port_input.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        self.port_input.editingFinished.connect(self._auto_lookup_keychain)
+        self.port_input.editingFinished.connect(lambda: self._auto_lookup_keychain(allow_user_autodiscovery=False))
         form_layout.addWidget(self.port_input)
 
-        # Username (Editable ComboBox populated from profiles)
+        # Username (Editable ComboBox populated from QSettings)
         form_layout.addWidget(QLabel("User:", self))
         self.user_input = ProfileComboBox(self)
+        self.user_input.set_popup_callback(self._refresh_user_dropdown_items)
+        self.user_input.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.user_input.customContextMenuRequested.connect(self._show_credential_context_menu)
         user_line_edit = self.user_input.lineEdit()
         if user_line_edit is not None:
             user_line_edit.setPlaceholderText("admin")
-            user_line_edit.editingFinished.connect(self._auto_lookup_keychain)
+            user_line_edit.editingFinished.connect(lambda: self._auto_lookup_keychain(allow_user_autodiscovery=False))
+            user_line_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            user_line_edit.customContextMenuRequested.connect(self._show_credential_context_menu)
         self.user_input.setMinimumWidth(115)
         self.user_input.setMaximumWidth(140)
+        self.user_input.activated.connect(self._on_user_dropdown_selected)
         self.user_input.currentTextChanged.connect(self._on_user_combo_changed)
         form_layout.addWidget(self.user_input)
 
@@ -746,14 +776,26 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.table_view)
 
-        # Bottom Bar: Summary Segments Counter below Table View
+        # Bottom Bar: Summary Segments Metric Badges below Table View
         bottom_bar = QHBoxLayout()
         bottom_bar.setSpacing(10)
         bottom_bar.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        self.summary_label = QLabel("0 segments discovered (0 B) | 0 selected (0 B)", self)
-        self.summary_label.setStyleSheet("font-size: 11px; font-weight: 600; color: #94A3B8;")
-        bottom_bar.addWidget(self.summary_label)
+        # Badge 1: Discovered Segments
+        self.discovered_badge = QLabel("0 Segments Discovered · 0 B", self)
+        self.discovered_badge.setObjectName("discoveredBadge")
+        self.discovered_badge.setStyleSheet(
+            "background-color: #1E293B; color: #E2E8F0; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; border: 1px solid #334155;"
+        )
+        bottom_bar.addWidget(self.discovered_badge)
+
+        # Badge 2: Selected Segments
+        self.selected_badge = QLabel("0 Selected · 0 B", self)
+        self.selected_badge.setObjectName("selectedBadge")
+        self.selected_badge.setStyleSheet(
+            "background-color: #1E293B; color: #64748B; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; border: 1px solid #334155;"
+        )
+        bottom_bar.addWidget(self.selected_badge)
 
         bottom_bar.addStretch(1)
         layout.addLayout(bottom_bar)
@@ -834,9 +876,16 @@ class MainWindow(QMainWindow):
     # Profiles & Keychain Logic
     # =========================================================================
 
-    def _populate_profile_combos(self) -> None:
-        """Populate Host and User combo boxes from saved profiles and .env defaults."""
-        hosts = get_saved_hosts()
+    @property
+    def summary_label(self) -> QLabel:
+        """Backwards compatibility alias for summary label."""
+        return self.discovered_badge
+
+    def _refresh_host_dropdown_items(self) -> None:
+        """Dynamically refresh the host dropdown list with latest items from QSettings before popup shows."""
+        host_line_edit = self.host_input.lineEdit()
+        current_text = host_line_edit.text() if host_line_edit is not None else self.host_input.currentText()
+        hosts = get_saved_hosts_from_settings()
         if NVR_HOST and NVR_HOST not in hosts:
             hosts.insert(0, NVR_HOST)
 
@@ -844,35 +893,108 @@ class MainWindow(QMainWindow):
         self.host_input.clear()
         for h in hosts:
             self.host_input.addItem(h)
-        if NVR_HOST:
-            self.host_input.setText(NVR_HOST)
-        elif hosts:
-            self.host_input.setText(hosts[0])
+        if host_line_edit is not None:
+            host_line_edit.setText(current_text)
+        else:
+            self.host_input.setEditText(current_text)
         self.host_input.blockSignals(False)
 
-        current_host = self.host_input.text()
-        users = get_saved_usernames(current_host)
+    def _refresh_user_dropdown_items(self) -> None:
+        """Dynamically refresh the user dropdown list with latest items from QSettings before popup shows."""
+        user_line_edit = self.user_input.lineEdit()
+        current_text = user_line_edit.text() if user_line_edit is not None else self.user_input.currentText()
+        active_host = self.host_input.text()
+        users = get_saved_usernames_from_settings(active_host) if active_host else get_saved_usernames_from_settings(None)
         default_user = NVR_USERNAME or "admin"
-        if default_user not in users:
-            users.insert(0, default_user)
+        if not users and default_user:
+            users.append(default_user)
 
         self.user_input.blockSignals(True)
         self.user_input.clear()
         for u in users:
             self.user_input.addItem(u)
-        self.user_input.setText(default_user)
+        if user_line_edit is not None:
+            user_line_edit.setText(current_text)
+        else:
+            self.user_input.setEditText(current_text)
+        self.user_input.blockSignals(False)
+
+    def _on_host_dropdown_selected(self, index: int) -> None:
+        """Handle user selecting a host profile from dropdown and immediately update credentials."""
+        host = self.host_input.itemText(index) if index >= 0 else self.host_input.text()
+        if host:
+            profiles = load_profiles_from_settings()
+            matching = [p for p in profiles if p.host.lower() == host.lower()]
+            if matching:
+                self.port_input.setValue(matching[0].port)
+                users = get_saved_usernames_from_settings(host)
+                if users:
+                    self.user_input.blockSignals(True)
+                    self.user_input.clear()
+                    for u in users:
+                        self.user_input.addItem(u)
+                    chosen_user = matching[0].username or users[0]
+                    self.user_input.setText(chosen_user)
+                    self.user_input.blockSignals(False)
+        self._auto_lookup_keychain(allow_user_autodiscovery=True)
+
+    def _on_user_dropdown_selected(self, index: int) -> None:
+        """Handle user selecting a username from dropdown and immediately query Keychain."""
+        user = self.user_input.itemText(index) if index >= 0 else self.user_input.text()
+        if user:
+            self.user_input.setText(user)
+        self._auto_lookup_keychain(allow_user_autodiscovery=False)
+
+    def _populate_profile_combos(self, preserve_current: bool = True) -> None:
+        """Populate Host and User combo boxes from saved QSettings."""
+        current_h = self.host_input.text() if preserve_current else ""
+        current_u = self.user_input.text() if preserve_current else ""
+
+        hosts = get_saved_hosts_from_settings()
+        if NVR_HOST and NVR_HOST not in hosts:
+            hosts.insert(0, NVR_HOST)
+
+        self.host_input.blockSignals(True)
+        self.host_input.clear()
+        for h in hosts:
+            self.host_input.addItem(h)
+        if current_h:
+            self.host_input.setText(current_h)
+        elif NVR_HOST:
+            self.host_input.setText(NVR_HOST)
+        elif hosts:
+            self.host_input.setText(hosts[0])
+        else:
+            self.host_input.setEditText("")
+        self.host_input.blockSignals(False)
+
+        active_host = self.host_input.text()
+        users = get_saved_usernames_from_settings(active_host) if active_host else []
+        default_user = NVR_USERNAME or "admin"
+        if not users and default_user:
+            users.append(default_user)
+
+        self.user_input.blockSignals(True)
+        self.user_input.clear()
+        for u in users:
+            self.user_input.addItem(u)
+        if current_u:
+            self.user_input.setText(current_u)
+        elif users:
+            self.user_input.setText(users[0])
+        else:
+            self.user_input.setEditText("")
         self.user_input.blockSignals(False)
 
     def _on_host_combo_changed(self, host_text: str) -> None:
         """Update usernames dropdown and query keychain when host changes."""
         clean_host = host_text.strip()
         if clean_host:
-            profiles = load_profiles()
+            profiles = load_profiles_from_settings()
             matching = [p for p in profiles if p.host.lower() == clean_host.lower()]
             if matching:
                 self.port_input.setValue(matching[0].port)
-                # Update users combo
-                users = get_saved_usernames(clean_host)
+                users = get_saved_usernames_from_settings(clean_host)
                 if users:
                     self.user_input.blockSignals(True)
                     self.user_input.clear()
@@ -880,11 +1002,11 @@ class MainWindow(QMainWindow):
                         self.user_input.addItem(u)
                     self.user_input.setText(users[0])
                     self.user_input.blockSignals(False)
-        self._auto_lookup_keychain()
+        self._auto_lookup_keychain(allow_user_autodiscovery=True)
 
     def _on_user_combo_changed(self, user_text: str) -> None:
-        """Query keychain when username changes."""
-        self._auto_lookup_keychain()
+        """Query keychain when username changes without mutating username."""
+        self._auto_lookup_keychain(allow_user_autodiscovery=False)
 
     def _load_initial_credentials(self) -> None:
         """Load initial credentials on startup."""
@@ -901,8 +1023,8 @@ class MainWindow(QMainWindow):
                         self.user_input.setText(matched_user)
                     self.password_input.setText(password)
                     self.remember_cb.setChecked(True)
-                    self.password_input.setToolTip("🔑 Credentials retrieved from OS Keychain")
-                    self.log_message("INFO", f"Loaded stored credentials from OS Keychain for {matched_user or user}@{host}:{port}.")
+                    self.password_input.setToolTip("🔑 Retrieved from OS Keychain")
+                    self.log_message("INFO", f"Loaded password from OS Keychain for {matched_user or user}@{host}:{port}.")
                     return
             except (OSError, RuntimeError, ValueError) as exc:
                 self.log_message("ERROR", f"OS Keychain access failed: {exc}")
@@ -910,7 +1032,7 @@ class MainWindow(QMainWindow):
         if NVR_PASSWORD:
             self.password_input.setText(NVR_PASSWORD)
 
-    def _auto_lookup_keychain(self) -> None:
+    def _auto_lookup_keychain(self, allow_user_autodiscovery: bool = False) -> None:
         """Reactively lookup credentials from OS Keychain on host/user/port field edit."""
         host = self.host_input.text()
         user = self.user_input.text()
@@ -920,43 +1042,77 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            password = get_nvr_password(host, user, port) if user else None
-            if password is not None:
-                self.password_input.setText(password)
-                self.remember_cb.setChecked(True)
-                self.password_input.setToolTip("🔑 Credentials retrieved from OS Keychain")
-                self.log_message("INFO", f"Loaded password from OS Keychain for {user}@{host}:{port}.")
-            else:
-                # Fallback to credential auto-discovery across matching host
-                cred = get_nvr_credential(host, user, port)
+            if user:
+                password = get_nvr_password(host, user, port)
+                if password is not None:
+                    self.password_input.setText(password)
+                    self.remember_cb.setChecked(True)
+                    self.password_input.setToolTip("🔑 Retrieved from OS Keychain")
+                    self.log_message("INFO", f"Loaded password from OS Keychain for {user}@{host}:{port}.")
+                else:
+                    self.password_input.clear()
+                    self.password_input.setToolTip("")
+                    self.log_message("DEBUG", f"No keychain password entry found for {user}@{host}:{port}.")
+            elif allow_user_autodiscovery:
+                # Fallback to credential auto-discovery across matching host ONLY when explicitly permitted
+                cred = get_nvr_credential(host, "", port)
                 if cred is not None:
                     matched_user, matched_pw = cred
-                    if matched_user and matched_user != user:
+                    if matched_user:
+                        self.user_input.blockSignals(True)
                         self.user_input.setText(matched_user)
+                        self.user_input.blockSignals(False)
                     self.password_input.setText(matched_pw)
                     self.remember_cb.setChecked(True)
-                    self.password_input.setToolTip("🔑 Credentials retrieved from OS Keychain")
+                    self.password_input.setToolTip("🔑 Retrieved from OS Keychain")
                     self.log_message("INFO", f"Loaded password from OS Keychain for {matched_user}@{host}:{port}.")
                 else:
                     self.password_input.clear()
                     self.password_input.setToolTip("")
-                    self.log_message("DEBUG", f"No keychain password entry found for {user or 'unknown'}@{host}:{port}.")
+            else:
+                self.password_input.clear()
+                self.password_input.setToolTip("")
         except (OSError, RuntimeError, ValueError) as exc:
             self.log_message("ERROR", f"OS Keychain access failed: {exc}")
+
+    def _remove_current_profile_and_credentials(self) -> None:
+        """Remove current profile and credentials from OS Keychain and QSettings."""
+        host = self.host_input.text()
+        user = self.user_input.text()
+        port = self.port_input.value()
+        if host:
+            delete_nvr_password(host, user, port)
+            delete_profile_from_settings(host, port, user)
+            self.password_input.clear()
+            self.password_input.setToolTip("")
+            self.user_input.blockSignals(True)
+            self.user_input.clear()
+            self.user_input.setEditText("")
+            self.user_input.blockSignals(False)
+            self._populate_profile_combos(preserve_current=False)
+            self.log_message("INFO", f"Removed stored profile & Keychain credentials for {user or 'host'}@{host}:{port}.")
+
+    def _show_credential_context_menu(self, pos: QPoint | None = None) -> None:
+        """Show context menu for removing stored profile and OS Keychain credentials."""
+        menu = QMenu(self)
+        delete_action = menu.addAction("Remove Stored Profile & Keychain Credentials")
+        chosen = menu.exec(QCursor.pos())
+        if chosen == delete_action:
+            self._remove_current_profile_and_credentials()
 
     def _on_connection_field_changed(self) -> None:
         """Backwards-compatible alias for reactive keychain lookup."""
         self._auto_lookup_keychain()
 
     def _save_credentials_if_checked(self) -> None:
-        """Persist successful connection profile and save password in OS Keychain if requested."""
+        """Persist successful connection profile in QSettings and save password in OS Keychain if requested."""
         host = self.host_input.text()
         user = self.user_input.text()
         port = self.port_input.value()
         password = self.password_input.text()
 
         if host and user:
-            save_profile(host, port, user)
+            save_profile_to_settings(host, port, user)
 
         if self.remember_cb.isChecked() and host and user and password:
             try:
@@ -1107,8 +1263,12 @@ class MainWindow(QMainWindow):
         self.stream_combo.setEnabled(False)
         self._table_model.clear()
 
-        # Reset summary, progress, and buttons
-        self.summary_label.setText("0 segments discovered (0 B) | 0 selected (0 B)")
+        # Reset metric badges, progress, and buttons
+        self.discovered_badge.setText("0 Segments Discovered · 0 B")
+        self.selected_badge.setText("0 Selected · 0 B")
+        self.selected_badge.setStyleSheet(
+            "background-color: #1E293B; color: #64748B; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; border: 1px solid #334155;"
+        )
         self.overall_progress_bar.setValue(0)
         self.progress_readout.setText("[ 0% ]  Idle  |  0.0 Mbps  |  Elapsed: 00:00  |  ETA: --:--")
         self.start_download_btn.setEnabled(False)
@@ -1126,12 +1286,36 @@ class MainWindow(QMainWindow):
         )
         self.footer_device_label.setText("Disconnected · Ready")
 
-        # Clear password input
+        # Clear connection inputs
+        self.host_input.blockSignals(True)
+        self.host_input.clear()
+        self.host_input.setEditText("")
+        self.host_input.blockSignals(False)
+
+        self.port_input.setValue(80)
+
+        self.user_input.blockSignals(True)
+        self.user_input.clear()
+        self.user_input.setEditText("")
+        self.user_input.blockSignals(False)
+
         self.password_input.clear()
         self.password_input.setToolTip("")
+        self.remember_cb.setChecked(True)
 
-        # Log clean disconnection
-        self.log_message("INFO", "Session disconnected. Ready.")
+        # Reset recording time window
+        self.date_picker.setDate(QDate.currentDate())
+        cal = self.date_picker.calendarWidget()
+        if cal is not None:
+            cal.setDateTextFormat(QDate(), QTextCharFormat())
+
+        self.start_hh_combo.setCurrentText("00")
+        self.start_mm_combo.setCurrentText("00")
+        self.end_hh_combo.setCurrentText("23")
+        self.end_mm_combo.setCurrentText("59")
+
+        # Clear console log completely
+        self.console_log.clear()
 
     def _on_refresh_cameras_clicked(self) -> None:
         if self._session is None:
@@ -1359,9 +1543,22 @@ class MainWindow(QMainWindow):
         total_bytes = sum(item.size_bytes for item in self._table_model._items)
         selected_bytes = self._table_model.get_total_selected_size()
 
-        self.summary_label.setText(
-            f"{total_count} segments discovered ({format_size_human(total_bytes)}) | {selected_count} selected ({format_size_human(selected_bytes)})"
+        self.discovered_badge.setText(
+            f"{total_count} Segments Discovered · {format_size_human(total_bytes)}"
         )
+        if selected_count > 0:
+            self.selected_badge.setText(
+                f"✓ {selected_count} Selected · {format_size_human(selected_bytes)}"
+            )
+            self.selected_badge.setStyleSheet(
+                "background-color: #0F2D37; color: #38BDF8; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; border: 1px solid #1E6B7B;"
+            )
+        else:
+            self.selected_badge.setText("0 Selected · 0 B")
+            self.selected_badge.setStyleSheet(
+                "background-color: #1E293B; color: #64748B; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; border: 1px solid #334155;"
+            )
+
         self.start_download_btn.setEnabled(
             selected_count > 0 and self._session is not None and (self._download_worker is None or not self._download_worker.isRunning())
         )
@@ -1520,7 +1717,8 @@ class MainWindow(QMainWindow):
             self.main_splitter.setCollapsible(0, False)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Ensure background threads are terminated safely on window close."""
+        """Ensure window geometry is persisted and background threads are terminated safely on window close."""
+        save_window_geometry(self)
         if self._download_worker is not None and self._download_worker.isRunning():
             self._download_worker.cancel()
             self._download_worker.wait(2000)

@@ -64,10 +64,11 @@ src/hikvision_downloader/
 │
 ├── ui/
 │   ├── __init__.py
-│   ├── main_window.py     # Main Qt Application window & tab orchestrator
-│   ├── dates_view.py      # Calendar-based recording date selector widget
-│   ├── recordings_view.py # QTableView with checkboxes, sorting, & batch selector
-│   ├── settings_view.py   # NVR connection, credentials, & output path settings
+│   ├── main_window.py     # Main Qt Application window & operator console
+│   ├── settings.py        # Native cross-platform QSettings persistence & profile metadata
+│   ├── keychain.py        # Secure OS Keychain credential management via keyring
+│   ├── models.py          # QAbstractTableModel implementations for cameras & recordings
+│   ├── style.py           # Arivedha design tokens and Qt Style Sheets (QSS)
 │   └── workers.py         # QThread / QRunnable non-blocking background workers
 │
 ├── http_client.py         # HTTP session factory, request retries, & error handling
