@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from ..core.auth import create_authenticated_session
 from ..core.cameras import CameraDiscoveryService
+from ..core.dates import discover_available_dates
 from ..core.downloads import download_recording
 from ..core.models import (
     ByteCount,
@@ -133,6 +134,48 @@ class DiscoveryWorker(QThread):
         except (requests.RequestException, OSError, RuntimeError, ValueError) as exc:
             msg = f"Camera discovery error: {exc}"
             self.signal_log.emit("ERROR", msg)
+            self.signal_error.emit(msg)
+
+
+_DEFAULT_DISCOVERY_TRACK: TrackId = TrackId(101)
+
+
+class DatesWorker(QThread):
+    """Background worker for discovering dates containing CCTV recordings."""
+
+    signal_started = Signal()
+    signal_dates = Signal(object)  # dict[tuple[int, int], list[RecordingDate]]
+    signal_error = Signal(str)
+    signal_log = Signal(str, str)
+
+    def __init__(
+        self,
+        session: requests.Session,
+        host: str,
+        discovery_track_id: TrackId = _DEFAULT_DISCOVERY_TRACK,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.session = session
+        self.host = host
+        self.discovery_track_id = discovery_track_id
+
+    def run(self) -> None:
+        self.signal_started.emit()
+        self.signal_log.emit("INFO", f"Checking recording date distribution on NVR {self.host}...")
+
+        try:
+            dates_by_month, _duration = discover_available_dates(
+                session=self.session,
+                host=self.host,
+                discovery_track_id=self.discovery_track_id,
+            )
+            total_days = sum(len(days) for days in dates_by_month.values())
+            self.signal_log.emit("SUCCESS", f"Discovered {total_days} days with recorded footage on NVR.")
+            self.signal_dates.emit(dates_by_month)
+        except (requests.RequestException, OSError, RuntimeError, ValueError) as exc:
+            msg = f"Date distribution query error: {exc}"
+            self.signal_log.emit("WARN", msg)
             self.signal_error.emit(msg)
 
 

@@ -10,7 +10,7 @@ import keyring
 import keyring.errors
 import pytest
 import requests
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import QApplication
 
 # Guarantee headless offscreen Qt execution for offline test environments
@@ -23,6 +23,7 @@ from hikvision_downloader.core.models import (
     DownloadResult,
     ISODatetimeStr,
     Recording,
+    RecordingDate,
     TrackId,
 )
 from hikvision_downloader.ui.keychain import (
@@ -30,7 +31,12 @@ from hikvision_downloader.ui.keychain import (
     get_nvr_password,
     save_nvr_password,
 )
-from hikvision_downloader.ui.main_window import CameraRowWidget, MainWindow
+from hikvision_downloader.ui.main_window import (
+    ARIVEDHA_LOGO_SVG_PATH,
+    CameraRowWidget,
+    MainWindow,
+    resolve_default_output_dir,
+)
 from hikvision_downloader.ui.models import (
     RecordingItem,
     RecordingsTableModel,
@@ -40,6 +46,7 @@ from hikvision_downloader.ui.models import (
 )
 from hikvision_downloader.ui.workers import (
     AuthWorker,
+    DatesWorker,
     DiscoveryWorker,
     DownloadWorker,
     SearchWorker,
@@ -119,6 +126,19 @@ def test_check_disk_space_insufficient(tmp_path: Path, monkeypatch: pytest.Monke
     has_space, _req, free = check_disk_space(tmp_path, required_bytes=200 * 1024 * 1024)
     assert has_space is False
     assert free == 50 * 1024 * 1024
+
+
+def test_resolve_default_output_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Custom env var set
+    custom_dir = tmp_path / "custom_output"
+    monkeypatch.setenv("HIKVISION_OUTPUT_DIR", str(custom_dir))
+    assert resolve_default_output_dir() == custom_dir.resolve()
+
+    # Empty env var fallback to Downloads/HikvisionArchive
+    monkeypatch.delenv("HIKVISION_OUTPUT_DIR", raising=False)
+    fallback = resolve_default_output_dir()
+    assert fallback.name == "HikvisionArchive"
+    assert "Downloads" in str(fallback)
 
 
 # =============================================================================
@@ -285,6 +305,25 @@ def test_discovery_worker(qapp: QApplication, sample_camera: Camera, monkeypatch
     assert CameraNumber(1) in discovered[0]
 
 
+def test_dates_worker(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    session = requests.Session()
+    sample_dates = {(2026, 10): [RecordingDate(year=2026, month=10, day=1), RecordingDate(year=2026, month=10, day=2)]}
+
+    def mock_discover_dates(*args: object, **kwargs: object) -> tuple[dict[tuple[int, int], list[RecordingDate]], float]:
+        return sample_dates, 0.1
+
+    monkeypatch.setattr("hikvision_downloader.ui.workers.discover_available_dates", mock_discover_dates)
+
+    worker = DatesWorker(session, "192.168.1.100")
+    received_dates: list[dict[tuple[int, int], list[RecordingDate]]] = []
+    worker.signal_dates.connect(lambda d: received_dates.append(d))
+
+    worker.run()
+    assert len(received_dates) == 1
+    assert (2026, 10) in received_dates[0]
+    assert len(received_dates[0][(2026, 10)]) == 2
+
+
 def test_search_worker(qapp: QApplication, sample_camera: Camera, monkeypatch: pytest.MonkeyPatch) -> None:
     session = requests.Session()
     mock_resp = MagicMock()
@@ -372,26 +411,70 @@ def test_download_worker(
 
 def test_camera_row_widget(qapp: QApplication, sample_camera: Camera) -> None:
     widget = CameraRowWidget(sample_camera)
+    assert widget.objectName() == "cameraRow"
     assert widget.is_selected is True
-    assert widget.selected_stream == "HD"
-    assert widget.get_track_id() == TrackId(101)
 
-    widget.stream_combo.setCurrentIndex(1)
-    assert widget.selected_stream == "SD"
-    assert widget.get_track_id() == TrackId(102)
+    # Global mode: uses global stream parameter
+    assert widget.get_selected_stream(is_override_mode=False, global_stream="HD") == "HD"
+    assert widget.get_selected_stream(is_override_mode=False, global_stream="SD") == "SD"
+    assert widget.get_track_id(is_override_mode=False, global_stream="HD") == TrackId(101)
+    assert widget.get_track_id(is_override_mode=False, global_stream="SD") == TrackId(102)
+
+    # Override mode
+    widget.set_override_mode(True)
+    assert widget.stream_combo is not None
+    widget.stream_combo.setCurrentIndex(1)  # SD
+    assert widget.get_selected_stream(is_override_mode=True, global_stream="HD") == "SD"
+    assert widget.get_track_id(is_override_mode=True, global_stream="HD") == TrackId(102)
 
 
 def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) -> None:
     window = MainWindow()
-    assert window.windowTitle() == "HikVision Downloader by Arivedha"
+    assert window.windowTitle() == "HikVision Downloader"
     assert window.host_input.text() is not None
+    assert window.port_input.width() == 55
+    assert window.start_hh_combo.width() == 65
+    assert window.start_mm_combo.width() == 65
+    assert window.left_panel.minimumWidth() >= 380
+    assert window.main_splitter.isCollapsible(0) is False
+    assert window.camera_scroll.maximumHeight() == 220
     assert window.worker_slider.value() >= 1
+    assert ARIVEDHA_LOGO_SVG_PATH.exists()
 
     # Populate camera checklist
     window._on_discovery_cameras({CameraNumber(1): sample_camera})
     assert len(window._camera_rows) == 1
     assert window._camera_rows[0].camera.display_name == "D1 MainGate"
 
-    # Global stream change
-    window._on_global_stream_changed(1)  # All HD
-    assert window._camera_rows[0].selected_stream == "HD"
+    # Stream mode toggle
+    window.rb_override_stream.setChecked(True)
+    window._on_stream_mode_toggled(1, True)
+    assert window.global_stream_combo.isEnabled() is False
+
+    window.rb_global_stream.setChecked(True)
+    window._on_stream_mode_toggled(0, True)
+    assert window.global_stream_combo.isEnabled() is True
+
+    # Theme toggle
+    window._toggle_theme()
+    assert window._is_dark_theme is False
+    window._toggle_theme()
+    assert window._is_dark_theme is True
+
+    # Time presets
+    window._apply_time_preset("08", "00", "12", "00")
+    assert window.full_day_cb.isChecked() is False
+    assert window.start_hh_combo.currentText() == "08"
+    assert window.end_hh_combo.currentText() == "12"
+
+    # Calendar dates highlight
+    sample_dates = {(2026, 10): [RecordingDate(year=2026, month=10, day=1), RecordingDate(year=2026, month=10, day=2)]}
+    window._on_dates_discovered(sample_dates)
+    cal = window.date_picker.calendarWidget()
+    assert cal is not None
+    fmt = cal.dateTextFormat(QDate(2026, 10, 1))
+    assert fmt.toolTip() == "Footage Available"
+
+    # Console log high contrast check
+    window.log_message("INFO", "Test high contrast logging")
+    assert "Test high contrast logging" in window.console_log.toPlainText()
