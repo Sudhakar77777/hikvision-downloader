@@ -401,7 +401,7 @@ QProgressBar {
     color: #FFFFFF;
     font-weight: 600;
     font-size: 10px;
-    height: 10px;
+    height: 8px;
 }
 
 QProgressBar::chunk {
@@ -411,6 +411,18 @@ QProgressBar::chunk {
         stop: 1 #FF853E
     );
     border-radius: 3px;
+}
+
+QProgressBar[objectName^="workerBar"] {
+    background-color: #162032;
+    border: 1px solid #334155;
+    border-radius: 3px;
+    height: 6px;
+}
+
+QProgressBar[objectName^="workerBar"]::chunk {
+    background-color: #38BDF8;
+    border-radius: 2px;
 }
 
 /* Horizontal Sliders */
@@ -956,7 +968,7 @@ QProgressBar {
     color: #0F172A;
     font-weight: 600;
     font-size: 10px;
-    height: 10px;
+    height: 8px;
 }
 
 QProgressBar::chunk {
@@ -966,6 +978,18 @@ QProgressBar::chunk {
         stop: 1 #FF853E
     );
     border-radius: 3px;
+}
+
+QProgressBar[objectName^="workerBar"] {
+    background-color: #E2E8F0;
+    border: 1px solid #CBD5E1;
+    border-radius: 3px;
+    height: 6px;
+}
+
+QProgressBar[objectName^="workerBar"]::chunk {
+    background-color: #0284C7;
+    border-radius: 2px;
 }
 
 /* Horizontal Sliders */

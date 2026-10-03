@@ -842,7 +842,7 @@ def test_console_3tier_hierarchy_and_progress(qapp: QApplication) -> None:
     from hikvision_downloader.core.models import DownloadProgress, MegabitsPerSecond
 
     window = MainWindow()
-    assert window.overall_progress_bar.maximumHeight() == 10
+    assert window.overall_progress_bar.maximumHeight() == 8
     assert "Idle" in window.progress_readout.text()
 
     # Emulate download progress
@@ -859,8 +859,10 @@ def test_console_3tier_hierarchy_and_progress(qapp: QApplication) -> None:
     )
     window._on_download_progress(prog)
     assert window.overall_progress_bar.value() == 25  # (0 + 0.5) / 2 = 25%
-    assert "ch01_20261002_100000.mp4" in window.progress_readout.text()
-    assert "3.1 MB/s" in window.progress_readout.text()
+    assert "Files" in window.progress_readout.text()
+    assert window._worker_widgets[1].progress_bar.value() == 50
+    assert "ch01_20261002_100000.mp4" in window._worker_widgets[1].detail_label.text()
+    assert "3.1 MB/s" in window._worker_widgets[1].detail_label.text()
 
 
 def test_twin_summary_badges_reactivity(qapp: QApplication, sample_camera: Camera) -> None:
@@ -1152,7 +1154,7 @@ def test_main_window_multi_worker_progress_reporting(
     sample_camera: Camera,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify live multi-worker feedback string formatting in console readout."""
+    """Verify live multi-worker feedback string formatting and per-worker progress widgets."""
     monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_password", lambda h, u, p: None)
     monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_credential", lambda h, u, p: (u, None))
 
@@ -1191,9 +1193,237 @@ def test_main_window_multi_worker_progress_reporting(
     )
     window._on_download_progress(prog2)
 
-    readout = window.progress_readout.text()
-    assert "Worker 1: [cam1_segment1.mp4] 45% (3.2 MB/s)" in readout
-    assert "Worker 2: [cam1_segment2.mp4] 12% (2.9 MB/s)" in readout
+    assert window._worker_widgets[1].progress_bar.value() == 45
+    assert "[cam1_segment1.mp4] · 45% (3.2 MB/s)" in window._worker_widgets[1].detail_label.text()
+
+    assert window._worker_widgets[2].progress_bar.value() == 12
+    assert "[cam1_segment2.mp4] · 12% (2.9 MB/s)" in window._worker_widgets[2].detail_label.text()
+
+    assert "Files" in window.progress_readout.text()
+
+
+def test_recordings_table_model_aborted_cancelled_amber_styling(
+    qapp: QApplication,
+    sample_recording_item: RecordingItem,
+) -> None:
+    """Verify that 'Aborted' and 'Cancelled' statuses are rendered in Amber (#F59E0B) and not red."""
+    model = RecordingsTableModel()
+    model.set_recordings([sample_recording_item])
+    status_idx = model.index(0, RecordingsTableModel.COL_STATUS)
+
+    # Aborted status
+    model.update_item_status(sample_recording_item.filename, "Aborted")
+    brush_aborted = model.data(status_idx, Qt.ItemDataRole.ForegroundRole)
+    assert isinstance(brush_aborted, QBrush)
+    assert brush_aborted.color().name().lower() == "#f59e0b"
+
+    # Cancelled status
+    model.update_item_status(sample_recording_item.filename, "Cancelled")
+    brush_cancelled = model.data(status_idx, Qt.ItemDataRole.ForegroundRole)
+    assert isinstance(brush_cancelled, QBrush)
+    assert brush_cancelled.color().name().lower() == "#f59e0b"
+
+    # Failed status remains red (#EF4444)
+    model.update_item_status(sample_recording_item.filename, "Failed")
+    brush_failed = model.data(status_idx, Qt.ItemDataRole.ForegroundRole)
+    assert isinstance(brush_failed, QBrush)
+    assert brush_failed.color().name().lower() == "#ef4444"
+
+
+def test_download_worker_cancellation_state_purge_10_files(
+    qapp: QApplication,
+    sample_camera: Camera,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that cancelling a 10-file batch with 2 workers only marks the 2 in-flight files as Aborted,
+
+    keeps 8 unstarted files Pending, emits zero ERROR logs, and emits a single operator warning.
+    """
+    items: list[RecordingItem] = []
+    for i in range(1, 11):
+        rec = Recording(
+            start=ISODatetimeStr(f"2026-10-02T10:{i:02d}:00Z"),
+            end=ISODatetimeStr(f"2026-10-02T10:{i+1:02d}:00Z"),
+            name=f"rec_{i:02d}.mp4",
+            size_bytes=ByteCount(1024 * 100),
+            playback_uri=f"rtsp://192.168.1.100/{i}",
+        )
+        items.append(RecordingItem(recording=rec, camera=sample_camera, stream="HD", track_id=TrackId(101)))
+
+    worker_start_barrier = threading.Barrier(2)
+    in_flight_lock = threading.Lock()
+    in_flight_active = 0
+    in_flight_seen: list[str] = []
+
+    def mock_cancellable_download(*args: object, **kwargs: object) -> tuple[bool, float, ByteCount, bool, str | None]:
+        nonlocal in_flight_active
+        cancel_event: threading.Event | None = kwargs.get("cancel_event")  # type: ignore[assignment]
+        rec_obj: Recording = kwargs["recording"]  # type: ignore[assignment]
+
+        with in_flight_lock:
+            in_flight_active += 1
+            in_flight_seen.append(rec_obj.name)
+
+        if len(in_flight_seen) <= 2:
+            try:
+                worker_start_barrier.wait(timeout=1.0)
+            except threading.BrokenBarrierError:
+                pass
+
+        # Simulate stream waiting for cancel or progress
+        for _ in range(50):
+            if cancel_event is not None and cancel_event.is_set():
+                return False, 0.05, ByteCount(0), False, "Download cancelled"
+            time.sleep(0.01)
+
+        return True, 0.1, ByteCount(1024), False, None
+
+    monkeypatch.setattr("hikvision_downloader.ui.workers.download_recording", mock_cancellable_download)
+
+    session = requests.Session()
+    worker = DownloadWorker(
+        session=session,
+        host="192.168.1.100",
+        port=80,
+        selected_items=items,
+        output_root=tmp_path,
+        max_workers=2,
+        save_csv=False,
+    )
+
+    started_events: list[tuple[str, int]] = []
+    completed_events: list[tuple[str, str, bool]] = []
+    log_events: list[tuple[str, str]] = []
+    final_results: list[DownloadResult] = []
+
+    worker.signal_file_started.connect(lambda f, wid: started_events.append((f, wid)), Qt.ConnectionType.DirectConnection)
+    worker.signal_file_completed.connect(lambda f, s, sk: completed_events.append((f, s, sk)), Qt.ConnectionType.DirectConnection)
+    worker.signal_log.connect(lambda lvl, msg: log_events.append((lvl, msg)), Qt.ConnectionType.DirectConnection)
+    worker.signal_finished.connect(lambda res: final_results.append(res), Qt.ConnectionType.DirectConnection)
+
+    def trigger_cancel() -> None:
+        try:
+            worker_start_barrier.wait(timeout=1.0)
+        except threading.BrokenBarrierError:
+            pass
+        time.sleep(0.02)
+        worker.cancel()
+
+    cancel_thread = threading.Thread(target=trigger_cancel)
+    cancel_thread.start()
+
+    worker.run()
+    cancel_thread.join()
+
+    # 1. Exactly 2 files were in-flight when cancelled
+    assert len(started_events) == 2
+
+    # 2. ONLY the 2 in-flight files emitted completed signal with status "Aborted"
+    assert len(completed_events) == 2
+    for fn, status, is_skipped in completed_events:
+        assert status == "Aborted"
+        assert is_skipped is False
+
+    # 3. ZERO red [ERROR] lines logged
+    error_logs = [msg for lvl, msg in log_events if lvl == "ERROR"]
+    assert len(error_logs) == 0
+
+    # 4. Clean single operator warning log
+    warn_logs = [msg for lvl, msg in log_events if lvl == "WARN"]
+    assert len(warn_logs) == 1
+    assert "Batch download aborted by operator. (0 downloaded, 0 skipped, 2 aborted)." in warn_logs[0]
+
+    # 5. Result verification
+    assert len(final_results) == 1
+    assert final_results[0].success is False
+    assert final_results[0].failed_index is None
+    assert final_results[0].downloaded_files == 0
+    assert final_results[0].skipped_files == 0
+    assert final_results[0].error_message == "Batch download aborted by operator"
+
+
+def test_main_window_cancellation_ui_purge(
+    qapp: QApplication,
+    sample_camera: Camera,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify MainWindow UI behavior on cancellation: only 2 files transition to Aborted,
+
+    8 files stay Pending, ZERO error logs appear in console, and worker bars reset.
+    """
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_password", lambda h, u, p: None)
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_credential", lambda h, u, p: (u, None))
+
+    items: list[RecordingItem] = []
+    for i in range(1, 11):
+        rec = Recording(
+            start=ISODatetimeStr(f"2026-10-02T10:{i:02d}:00Z"),
+            end=ISODatetimeStr(f"2026-10-02T10:{i+1:02d}:00Z"),
+            name=f"video_{i:02d}.mp4",
+            size_bytes=ByteCount(1024 * 1024),
+            playback_uri=f"rtsp://192.168.1.100/{i}",
+        )
+        items.append(RecordingItem(recording=rec, camera=sample_camera, stream="HD", track_id=TrackId(101), checked=True))
+
+    barrier = threading.Barrier(2)
+
+    def mock_download_with_cancel(*args: object, **kwargs: object) -> tuple[bool, float, ByteCount, bool, str | None]:
+        cancel_event: threading.Event | None = kwargs.get("cancel_event")  # type: ignore[assignment]
+        try:
+            barrier.wait(timeout=0.5)
+        except threading.BrokenBarrierError:
+            pass
+
+        for _ in range(50):
+            if cancel_event is not None and cancel_event.is_set():
+                return False, 0.05, ByteCount(0), False, "Download cancelled"
+            time.sleep(0.01)
+        return True, 0.1, ByteCount(1024), False, None
+
+    monkeypatch.setattr("hikvision_downloader.ui.workers.download_recording", mock_download_with_cancel)
+
+    window = MainWindow()
+    window._session = requests.Session()
+    window.output_dir_input.setText(str(tmp_path))
+    window.worker_slider.setValue(2)
+    window._table_model.set_recordings(items)
+
+    # Start download
+    window._on_start_download_clicked()
+    assert window.worker_rows_container.isHidden() is False
+    assert window._worker_widgets[1].container.isHidden() is False
+    assert window._worker_widgets[2].container.isHidden() is False
+    assert window._worker_widgets[3].container.isHidden() is True
+    assert window._worker_widgets[4].container.isHidden() is True
+
+    # Trigger abort
+    time.sleep(0.02)
+    window._on_abort_clicked()
+    assert window._download_worker is not None
+    window._download_worker.wait(3000)
+    qapp.processEvents()
+
+    # Table verification: only 2 in-flight items are "Aborted", other 8 are "Pending"
+    statuses = [item.status for item in window._table_model._items]
+    aborted_items = [s for s in statuses if s == "Aborted"]
+    pending_items = [s for s in statuses if s == "Pending"]
+    failed_items = [s for s in statuses if s == "Failed"]
+
+    assert len(aborted_items) == 2
+    assert len(pending_items) == 8
+    assert len(failed_items) == 0
+
+    # Console verification: ZERO [ERROR] lines logged
+    console_text = window.console_log.toPlainText()
+    assert "[ERROR]" not in console_text
+    assert "Batch download aborted by operator." in console_text
+
+    # Worker rows container hidden and reset
+    assert window.worker_rows_container.isHidden() is True
+    assert window._worker_widgets[1].progress_bar.value() == 0
+    assert window._worker_widgets[1].detail_label.text() == "Idle"
 
 
 

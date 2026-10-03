@@ -364,7 +364,7 @@ class RecordingsTableModel(QAbstractTableModel):
                     return QBrush(QColor("#10B981"))
                 if item.status == "Downloading" or item.status.startswith("Downloading"):
                     return QBrush(QColor("#38BDF8"))
-                if item.status == "Skipped":
+                if item.status in ("Skipped", "Aborted", "Cancelled"):
                     return QBrush(QColor("#F59E0B"))
                 if item.status == "Failed":
                     return QBrush(QColor("#EF4444"))

@@ -413,6 +413,7 @@ class DownloadWorker(QThread):
         batch_start_time = time.monotonic()
         downloaded_count = 0
         skipped_count = 0
+        aborted_count = 0
         downloaded_bytes = 0
         failed_idx: int | None = None
         error_msg: str | None = None
@@ -432,13 +433,16 @@ class DownloadWorker(QThread):
             item: RecordingItem,
             dest_dir: Path,
             target_filename: str,
-        ) -> tuple[int, RecordingItem, str, bool, float, ByteCount, bool, str | None]:
+        ) -> tuple[int, RecordingItem, str, bool, float, ByteCount, bool, str | None, bool]:
             if self._cancel_event.is_set():
-                return global_idx, item, target_filename, False, 0.0, ByteCount(0), False, "Download cancelled"
+                return global_idx, item, target_filename, False, 0.0, ByteCount(0), False, "Download cancelled", False
 
             worker_id = worker_id_queue.get()
             destination = dest_dir / target_filename
             try:
+                if self._cancel_event.is_set():
+                    return global_idx, item, target_filename, False, 0.0, ByteCount(0), False, "Download cancelled", False
+
                 self.signal_file_started.emit(item.filename, worker_id)
                 self.signal_log.emit("INFO", f"[Worker {worker_id}] [{global_idx}/{total_files}] Downloading {target_filename}...")
 
@@ -455,7 +459,7 @@ class DownloadWorker(QThread):
                     progress_callback=_progress_adapter,
                     cancel_event=self._cancel_event,
                 )
-                return global_idx, item, target_filename, success, duration, actual_size, is_skipped, err
+                return global_idx, item, target_filename, success, duration, actual_size, is_skipped, err, True
             finally:
                 worker_id_queue.put(worker_id)
 
@@ -467,7 +471,7 @@ class DownloadWorker(QThread):
 
             for future in as_completed(future_to_item):
                 try:
-                    g_idx, item, target_filename, success, duration, actual_size, is_skipped, err = future.result()
+                    g_idx, item, target_filename, success, duration, actual_size, is_skipped, err, was_started = future.result()
                 except (requests.RequestException, OSError, RuntimeError, ValueError) as exc:
                     g_idx, item, target_filename = future_to_item[future]
                     success = False
@@ -475,15 +479,26 @@ class DownloadWorker(QThread):
                     actual_size = ByteCount(0)
                     is_skipped = False
                     err = str(exc)
+                    was_started = True
 
                 with lock:
+                    if not was_started:
+                        # Task was never started before cancellation; remains Pending without marking or error logging
+                        continue
+
                     if not success:
-                        if failed_idx is None:
-                            failed_idx = g_idx
-                            error_msg = err or "Download failed"
-                            self._cancel_event.set()
-                        self.signal_file_completed.emit(item.filename, "Failed", False)
-                        self.signal_log.emit("ERROR", f"Failed {target_filename}: {err}")
+                        if self._cancel_event.is_set() and (err == "Download cancelled" or failed_idx is None):
+                            # Active in-flight file was cleanly cancelled by operator
+                            aborted_count += 1
+                            self.signal_file_completed.emit(item.filename, "Aborted", False)
+                        else:
+                            # Genuine download failure
+                            if failed_idx is None:
+                                failed_idx = g_idx
+                                error_msg = err or "Download failed"
+                                self._cancel_event.set()
+                            self.signal_file_completed.emit(item.filename, "Failed", False)
+                            self.signal_log.emit("ERROR", f"Failed {target_filename}: {err}")
                     else:
                         if is_skipped:
                             skipped_count += 1
@@ -502,7 +517,10 @@ class DownloadWorker(QThread):
         total_duration = time.monotonic() - batch_start_time
 
         if self._cancel_event.is_set() and failed_idx is None:
-            self.signal_log.emit("WARN", "Batch download cancelled by user.")
+            self.signal_log.emit(
+                "WARN",
+                f"Batch download aborted by operator. ({downloaded_count} downloaded, {skipped_count} skipped, {aborted_count} aborted).",
+            )
             result = DownloadResult(
                 success=False,
                 total_files=total_files,
@@ -510,10 +528,11 @@ class DownloadWorker(QThread):
                 skipped_files=skipped_count,
                 downloaded_bytes=ByteCount(downloaded_bytes),
                 total_duration_seconds=total_duration,
-                failed_index=failed_idx,
-                error_message="Batch download cancelled by operator",
+                failed_index=None,
+                error_message="Batch download aborted by operator",
             )
         elif failed_idx is not None:
+            self.signal_log.emit("ERROR", f"Batch download stopped with error: {error_msg}")
             result = DownloadResult(
                 success=False,
                 total_files=total_files,
