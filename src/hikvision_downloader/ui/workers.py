@@ -271,6 +271,7 @@ class SearchWorker(QThread):
                         batch_size=batch_size,
                     )
 
+                    batch: list[Recording] = []
                     try:
                         resp = request_with_retry(
                             self.session,

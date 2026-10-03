@@ -58,8 +58,6 @@ QGroupBox {
     font-weight: 600;
     font-size: 12px;
     color: #94A3B8;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
 }
 
 QGroupBox::title {
@@ -206,7 +204,6 @@ QPushButton#primaryActionBtn, QPushButton#downloadBtn {
     font-weight: 700;
     padding: 8px 16px;
     border-radius: 6px;
-    letter-spacing: 0.3px;
     min-height: 32px;
 }
 
@@ -449,7 +446,6 @@ QSlider::handle:horizontal {
 
 QSlider::handle:horizontal:hover {
     background-color: #7DD3FC;
-    transform: scale(1.1);
 }
 
 /* Scroll Bars */
@@ -625,8 +621,6 @@ QGroupBox {
     font-weight: 600;
     font-size: 12px;
     color: #475569;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
 }
 
 QGroupBox::title {
@@ -773,7 +767,6 @@ QPushButton#primaryActionBtn, QPushButton#downloadBtn {
     font-weight: 700;
     padding: 8px 16px;
     border-radius: 6px;
-    letter-spacing: 0.3px;
     min-height: 32px;
 }
 

@@ -374,7 +374,7 @@ def discover_cameras_isapi(
             tracks_mapping: dict[str, TrackId] = {}
             if tracks_by_channel.get(ch_id):
                 for s_name, s_val in tracks_by_channel[ch_id].items():
-                    tracks_mapping[str(s_name)] = TrackId(int(s_val))
+                    tracks_mapping[s_name] = TrackId(s_val)
 
             elif ch_id in status_data:
                 st = status_data[ch_id]
@@ -383,7 +383,7 @@ def discover_cameras_isapi(
                     for s_name, s_val in st_tracks_raw.items():
                         try:
                             tracks_mapping[str(s_name)] = TrackId(int(str(s_val)))
-                        except ValueError, TypeError:
+                        except (ValueError, TypeError):
                             pass
 
             if not tracks_mapping:
@@ -427,7 +427,7 @@ def discover_cameras_isapi(
     for ch_id_val in sorted(all_ch_ids):
         ch_cam_num = CameraNumber(ch_id_val)
         ch_tracks = tracks_by_channel.get(ch_id_val, {})
-        tracks_mapping = {k: TrackId(int(v)) for k, v in ch_tracks.items()}
+        tracks_mapping = {k: TrackId(v) for k, v in ch_tracks.items()}
         if "main" not in tracks_mapping:
             tracks_mapping["main"] = TrackId(ch_id_val * 100 + 1)
 

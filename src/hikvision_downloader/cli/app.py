@@ -252,7 +252,7 @@ def resolve_camera(cameras: dict[CameraNumber, Camera], camera_spec: str | int) 
         camera_num = CameraNumber(num)
         if camera_num in cameras:
             return cameras[camera_num]
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         pass
 
     # Attempt 2: Match by name or display name (case-insensitive)

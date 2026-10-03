@@ -59,5 +59,11 @@ filterwarnings = [
     "ignore::DeprecationWarning",
 ]
 
+[tool.pyrefly]
+python-version = "3.14"
+preset = "strict"
 
-
+[tool.pyrefly.errors]
+implicit-any-lambda = "ignore"
+missing-override-decorator = "ignore"
+bad-argument-type = "ignore"

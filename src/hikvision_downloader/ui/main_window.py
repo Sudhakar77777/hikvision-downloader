@@ -733,7 +733,7 @@ class MainWindow(QMainWindow):
         self.worker_slider.setFixedWidth(100)
         self.worker_label = QLabel(f"{NVR_MAX_WORKERS} workers", self)
         self.worker_label.setStyleSheet("color: #38BDF8; font-weight: bold; min-width: 65px;")
-        self.worker_slider.valueChanged.connect(lambda v: self.worker_label.setText(f"{v} worker{'s' if v > 1 else ''}"))
+        self.worker_slider.valueChanged.connect(self._on_worker_slider_changed)
         row2.addWidget(self.worker_slider)
         row2.addWidget(self.worker_label)
 
@@ -745,6 +745,22 @@ class MainWindow(QMainWindow):
         layout.addLayout(row2)
 
         return frame
+
+    def _on_worker_slider_changed(self, value: int) -> None:
+        """Update worker count label when slider changes."""
+        self.worker_label.setText(f"{value} worker{'s' if value > 1 else ''}")
+
+    def _on_discovery_error(self, err: str) -> None:
+        """Display camera discovery error modal."""
+        QMessageBox.warning(self, "Discovery Warning", err)
+
+    def _on_search_error(self, err: str) -> None:
+        """Display search query error modal."""
+        QMessageBox.warning(self, "Search Warning", err)
+
+    def _on_download_error(self, err: str) -> None:
+        """Display batch download error modal."""
+        QMessageBox.critical(self, "Download Error", err)
 
     def _build_recordings_view_panel(self) -> QWidget:
         panel = QFrame(self)
@@ -1053,7 +1069,7 @@ class MainWindow(QMainWindow):
         self.host_input.blockSignals(False)
 
         active_host = self.host_input.text()
-        users = get_saved_usernames_from_settings(active_host) if active_host else []
+        users: list[str] = list(get_saved_usernames_from_settings(active_host)) if active_host else []
         default_user = NVR_USERNAME or "admin"
         if not users and default_user:
             users.append(default_user)
@@ -1426,7 +1442,7 @@ class MainWindow(QMainWindow):
         self._discovery_worker.signal_log.connect(self.log_message)
         self._discovery_worker.signal_cameras.connect(self._on_discovery_cameras)
         self._discovery_worker.signal_device_info.connect(self._on_device_info_discovered)
-        self._discovery_worker.signal_error.connect(lambda err: QMessageBox.warning(self, "Discovery Warning", err))
+        self._discovery_worker.signal_error.connect(self._on_discovery_error)
         self._discovery_worker.start()
 
     def _trigger_dates_discovery(self) -> None:
@@ -1582,7 +1598,7 @@ class MainWindow(QMainWindow):
         self._search_worker.signal_log.connect(self.log_message)
         self._search_worker.signal_camera_recordings.connect(self._on_camera_recordings_found)
         self._search_worker.signal_finished.connect(self._on_search_finished)
-        self._search_worker.signal_error.connect(lambda err: QMessageBox.warning(self, "Search Warning", err))
+        self._search_worker.signal_error.connect(self._on_search_error)
         self._search_worker.start()
 
     def _on_camera_recordings_found(
@@ -1763,7 +1779,7 @@ class MainWindow(QMainWindow):
         self._download_worker.signal_progress.connect(self._on_download_progress)
         self._download_worker.signal_file_completed.connect(self._on_file_completed)
         self._download_worker.signal_finished.connect(self._on_download_finished)
-        self._download_worker.signal_error.connect(lambda err: QMessageBox.critical(self, "Download Error", err))
+        self._download_worker.signal_error.connect(self._on_download_error)
         self._download_worker.start()
 
     def _on_file_started(self, filename: str, worker_id: int) -> None:
