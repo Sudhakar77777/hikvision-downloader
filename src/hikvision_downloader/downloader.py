@@ -24,7 +24,6 @@ from .core.recordings import get_all_recordings, recording_total_size
 # ============================================================
 
 
-
 def discover_dates(session: requests.Session, host: str) -> dict[tuple[int, int], list[RecordingDate]]:
     """Discover and display dates with available recordings."""
     print()
@@ -109,4 +108,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

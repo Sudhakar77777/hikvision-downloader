@@ -210,7 +210,6 @@ def test_discover_cameras_isapi_input_proxy_success(mocker: MockerFixture) -> No
             resp.text = SAMPLE_INPUT_PROXY_CHANNELS_XML
         return resp
 
-
     mocker.patch("hikvision_downloader.core.cameras.request_with_retry", side_effect=fake_request)
 
     session = MagicMock()

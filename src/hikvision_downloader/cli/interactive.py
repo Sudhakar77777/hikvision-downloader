@@ -81,9 +81,6 @@ def ask_stream(camera: Camera | None = None) -> str | None:
         print(f"Please enter a number between 1 and {len(stream_options)} or stream name.")
 
 
-
-
-
 def ask_recording_date(months: dict[tuple[int, int], list[RecordingDate]]) -> date | None:
     """Prompt the user to select one of the discovered recording dates."""
     available_dates = {item.iso for dates in months.values() for item in dates}

@@ -141,7 +141,6 @@ def search_recordings(
         raise
 
 
-
 def get_all_recordings(
     session: requests.Session,
     host: str,

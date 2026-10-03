@@ -783,4 +783,3 @@ def test_multi_progress_display_tty(monkeypatch: pytest.MonkeyPatch, capsys: pyt
     assert "OK" in captured_done
 
     display.reset()
-

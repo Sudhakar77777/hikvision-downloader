@@ -84,7 +84,6 @@ def parse_tracks_xml(xml_text: str) -> tuple[dict[int, dict[str, int]], dict[int
     if not isinstance(xml_text, str) or not xml_text.strip():
         return {}, {}
 
-
     root = ET.fromstring(xml_text)
     tracks_by_channel: dict[int, dict[str, int]] = {}
     channel_names: dict[int, str] = {}
@@ -102,11 +101,7 @@ def parse_tracks_xml(xml_text: str) -> tuple[dict[int, dict[str, int]], dict[int
         for attr_key, attr_val in item.attrib.items():
             key_lower = attr_key.lower()
             val_clean = attr_val.strip()
-            if (
-                val_clean
-                and key_lower in ("name", "trackname", "channelname", "cameraname")
-                and is_meaningful_camera_name(val_clean)
-            ):
+            if val_clean and key_lower in ("name", "trackname", "channelname", "cameraname") and is_meaningful_camera_name(val_clean):
                 extracted_name = val_clean
 
         for child in item:
@@ -122,10 +117,7 @@ def parse_tracks_xml(xml_text: str) -> tuple[dict[int, dict[str, int]], dict[int
                 description = text.lower()
                 if not extracted_name and is_meaningful_camera_name(text):
                     extracted_name = text
-            elif (
-                tag_lower in ("name", "trackname", "channelname", "cameraname", "devicename")
-                and is_meaningful_camera_name(text)
-            ):
+            elif tag_lower in ("name", "trackname", "channelname", "cameraname", "devicename") and is_meaningful_camera_name(text):
                 extracted_name = text
 
         if not track_id_str:
@@ -390,7 +382,7 @@ def discover_cameras_isapi(
                     for s_name, s_val in st_tracks_raw.items():
                         try:
                             tracks_mapping[str(s_name)] = TrackId(int(str(s_val)))
-                        except (ValueError, TypeError):
+                        except ValueError, TypeError:
                             pass
 
             if not tracks_mapping:
@@ -563,4 +555,3 @@ def load_cameras(config_file: str | Path) -> dict[CameraNumber, Camera]:
         cameras[camera.number] = camera
 
     return cameras
-

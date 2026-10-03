@@ -29,11 +29,7 @@ def create_authenticated_session(
     agent = user_agent or USER_AGENT
     session.headers["User-Agent"] = agent
 
-    raw_password = (
-        effective_password.get_secret_value()
-        if isinstance(effective_password, SecretStr)
-        else str(effective_password)
-    )
+    raw_password = effective_password.get_secret_value() if isinstance(effective_password, SecretStr) else str(effective_password)
 
     if auth_type.lower() == "basic":
         session.auth = HTTPBasicAuth(effective_username, raw_password)

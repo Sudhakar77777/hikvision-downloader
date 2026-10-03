@@ -72,12 +72,9 @@ Task 007 introduces a responsive, non-blocking native PySide6 desktop GUI for Hi
 - Service name: `hikvision_downloader`
 - Functions:
   ```python
-  def save_nvr_password(host: str, username: str, password: str, port: int = 80) -> bool:
-      ...
-  def get_nvr_password(host: str, username: str, port: int = 80) -> str | None:
-      ...
-  def delete_nvr_password(host: str, username: str, port: int = 80) -> bool:
-      ...
+  def save_nvr_password(host: str, username: str, password: str, port: int = 80) -> bool: ...
+  def get_nvr_password(host: str, username: str, port: int = 80) -> str | None: ...
+  def delete_nvr_password(host: str, username: str, port: int = 80) -> bool: ...
   ```
 - Uses `keyring.set_password`, `keyring.get_password`, `keyring.delete_password`.
 - Wraps keychain calls in `try...except (keyring.errors.KeyringError, Exception)` to handle headless or locked keyring environments without crashing.
@@ -120,7 +117,7 @@ Task 007 introduces a responsive, non-blocking native PySide6 desktop GUI for Hi
   def check_disk_space(output_dir: Path, required_bytes: int) -> tuple[bool, int, int]:
       usage = shutil.disk_usage(output_dir)
       free_bytes = usage.free
-      has_space = free_bytes >= (required_bytes + 100 * 1024 * 1024) # 100MB safety buffer
+      has_space = free_bytes >= (required_bytes + 100 * 1024 * 1024)  # 100MB safety buffer
       return has_space, required_bytes, free_bytes
   ```
 - The UI displays an alert banner if `required_bytes > free_bytes` and prompts for user confirmation before starting batch download.

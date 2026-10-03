@@ -59,4 +59,3 @@ __all__ = [
     "run_app",
     "setup_signal_handler",
 ]
-

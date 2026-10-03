@@ -177,7 +177,10 @@ class MultiProgressDisplay:
                 else:
                     # If non-TTY and just starting (0 bytes), print starting notification so log is not silent
                     if int(progress.bytes_downloaded) == 0:
-                        print(f"[{progress.current_index}/{progress.total_files}] Downloading {progress.filename}{time_str} ({total_mb:.2f} MB)...", flush=True)
+                        print(
+                            f"[{progress.current_index}/{progress.total_files}] Downloading {progress.filename}{time_str} ({total_mb:.2f} MB)...",
+                            flush=True,
+                        )
 
     def _finalize_line(self, line: str, is_tty: bool) -> None:
         """Print a completed/skipped permanent line, redrawing any remaining active lines below it."""

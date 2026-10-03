@@ -42,26 +42,18 @@ def request_with_retry(
             # Never retry on 401 Unauthorized or 403 Forbidden: fail immediately
             if response.status_code in (401, 403):
                 status_desc = "401 Unauthorized" if response.status_code == 401 else "403 Forbidden"
-                raise RuntimeError(
-                    f"NVR returned {status_desc}. Check username and password credentials."
-                )
+                raise RuntimeError(f"NVR returned {status_desc}. Check username and password credentials.")
 
             response.raise_for_status()
             return response
 
         except (requests.RequestException, RuntimeError) as exc:
             # Do not retry client errors (400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found)
-            is_client_error = (
-                isinstance(exc, RuntimeError)
-                and ("401 Unauthorized" in str(exc) or "403 Forbidden" in str(exc))
-            ) or (
-                isinstance(exc, requests.HTTPError)
-                and exc.response is not None
-                and exc.response.status_code in (400, 401, 403, 404)
+            is_client_error = (isinstance(exc, RuntimeError) and ("401 Unauthorized" in str(exc) or "403 Forbidden" in str(exc))) or (
+                isinstance(exc, requests.HTTPError) and exc.response is not None and exc.response.status_code in (400, 401, 403, 404)
             )
             if is_client_error:
                 raise
-
 
             if verbose:
                 print(f"  Request attempt {attempt}/{max_retries} failed: {exc}")

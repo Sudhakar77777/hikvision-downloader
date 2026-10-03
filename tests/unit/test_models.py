@@ -101,7 +101,6 @@ def test_camera_invalid_stream_type() -> None:
         cam.track_id("invalid")
 
 
-
 def test_recording_date_valid() -> None:
     target = (datetime.now(UTC) - timedelta(days=7)).date()
     rec_date = RecordingDate(year=target.year, month=target.month, day=target.day)

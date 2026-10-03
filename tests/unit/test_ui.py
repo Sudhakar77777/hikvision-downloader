@@ -413,47 +413,31 @@ def test_camera_row_widget(qapp: QApplication, sample_camera: Camera) -> None:
     widget = CameraRowWidget(sample_camera)
     assert widget.objectName() == "cameraRow"
     assert widget.is_selected is True
+    assert widget.checkbox.text() == "D1 MainGate"
 
-    # Global mode: uses global stream parameter
-    assert widget.get_selected_stream(is_override_mode=False, global_stream="HD") == "HD"
-    assert widget.get_selected_stream(is_override_mode=False, global_stream="SD") == "SD"
-    assert widget.get_track_id(is_override_mode=False, global_stream="HD") == TrackId(101)
-    assert widget.get_track_id(is_override_mode=False, global_stream="SD") == TrackId(102)
-
-    # Override mode
-    widget.set_override_mode(True)
-    assert widget.stream_combo is not None
-    widget.stream_combo.setCurrentIndex(1)  # SD
-    assert widget.get_selected_stream(is_override_mode=True, global_stream="HD") == "SD"
-    assert widget.get_track_id(is_override_mode=True, global_stream="HD") == TrackId(102)
+    widget.checkbox.setChecked(False)
+    assert widget.is_selected is False
 
 
 def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) -> None:
     window = MainWindow()
     assert window.windowTitle() == "HikVision Downloader"
     assert window.host_input.text() is not None
-    assert window.port_input.width() == 55
-    assert window.start_hh_combo.width() == 65
-    assert window.start_mm_combo.width() == 65
-    assert window.left_panel.minimumWidth() >= 380
+    assert window.port_input.width() == 50
+    assert window.start_hh_combo.width() == 56
+    assert window.start_mm_combo.width() == 56
+    assert window.left_panel.minimumWidth() >= 410
     assert window.main_splitter.isCollapsible(0) is False
     assert window.camera_scroll.maximumHeight() == 220
     assert window.worker_slider.value() >= 1
+    assert window.stream_combo.count() == 1
     assert ARIVEDHA_LOGO_SVG_PATH.exists()
 
     # Populate camera checklist
     window._on_discovery_cameras({CameraNumber(1): sample_camera})
     assert len(window._camera_rows) == 1
     assert window._camera_rows[0].camera.display_name == "D1 MainGate"
-
-    # Stream mode toggle
-    window.rb_override_stream.setChecked(True)
-    window._on_stream_mode_toggled(1, True)
-    assert window.global_stream_combo.isEnabled() is False
-
-    window.rb_global_stream.setChecked(True)
-    window._on_stream_mode_toggled(0, True)
-    assert window.global_stream_combo.isEnabled() is True
+    assert window.stream_combo.count() == 2  # Has HD and SD
 
     # Theme toggle
     window._toggle_theme()
@@ -463,9 +447,18 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
 
     # Time presets
     window._apply_time_preset("08", "00", "12", "00")
-    assert window.full_day_cb.isChecked() is False
     assert window.start_hh_combo.currentText() == "08"
     assert window.end_hh_combo.currentText() == "12"
+
+    # Connect / Disconnect button state toggle
+    assert window.connect_btn.text() == "Connect"
+    window._trigger_discovery = MagicMock()
+    window._trigger_dates_discovery = MagicMock()
+    window._on_auth_finished(True, "Connected", requests.Session())
+    assert window.connect_btn.text() == "Disconnect"
+    window._disconnect_session()
+    assert window.connect_btn.text() == "Connect"
+    assert window._session is None
 
     # Calendar dates highlight
     sample_dates = {(2026, 10): [RecordingDate(year=2026, month=10, day=1), RecordingDate(year=2026, month=10, day=2)]}

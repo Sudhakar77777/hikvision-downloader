@@ -1,4 +1,4 @@
-"""Master PySide6 desktop application window for HikVision Downloader."""
+"""Master Desktop GUI Application for Hikvision Downloader adhering to Arivedha design tokens."""
 
 import os
 import sys
@@ -8,11 +8,19 @@ from pathlib import Path
 
 import requests
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QCloseEvent, QColor, QFont, QIcon, QPixmap, QTextCharFormat
+from PySide6.QtGui import (
+    QCloseEvent,
+    QColor,
+    QFont,
+    QFontDatabase,
+    QIcon,
+    QPixmap,
+    QShowEvent,
+    QTextCharFormat,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
-    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -28,12 +36,12 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QRadioButton,
     QScrollArea,
     QSlider,
     QSpinBox,
     QSplitter,
     QTableView,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -46,9 +54,21 @@ from ..config import (
     NVR_PORT,
     NVR_USERNAME,
 )
-from ..core.models import Camera, CameraNumber, DownloadProgress, DownloadResult, RecordingDate, TrackId
+from ..core.models import (
+    Camera,
+    CameraNumber,
+    DownloadProgress,
+    DownloadResult,
+    RecordingDate,
+    TrackId,
+)
 from .keychain import delete_nvr_password, get_nvr_password, save_nvr_password
-from .models import RecordingItem, RecordingsTableModel, check_disk_space, format_size_human
+from .models import (
+    RecordingItem,
+    RecordingsTableModel,
+    check_disk_space,
+    format_size_human,
+)
 from .style import DARK_THEME_QSS, LIGHT_THEME_QSS
 from .workers import AuthWorker, DatesWorker, DiscoveryWorker, DownloadWorker, SearchWorker
 
@@ -81,49 +101,9 @@ class CameraRowWidget(QWidget):
         self.checkbox.setChecked(True)
         self._layout.addWidget(self.checkbox, stretch=1)
 
-        has_sub_track = int(camera.sub_track) > 0 or (camera.tracks and "sub" in camera.tracks)
-        if has_sub_track:
-            self.stream_combo: QComboBox | None = QComboBox(self)
-            self.stream_combo.addItem("HD (Main)", "HD")
-            self.stream_combo.addItem("SD (Sub)", "SD")
-            self.stream_combo.setFixedWidth(100)
-            self._layout.addWidget(self.stream_combo)
-            self.badge_label: QLabel | None = None
-        else:
-            self.stream_combo = None
-            self.badge_label = QLabel("HD Only", self)
-            self.badge_label.setStyleSheet("color: #64748B; font-size: 11px; padding: 2px 6px;")
-            self._layout.addWidget(self.badge_label)
-
-        # By default in Global Stream mode, per-camera selectors are hidden
-        self.set_override_mode(False)
-
-    def set_override_mode(self, visible: bool) -> None:
-        """Toggle visibility of per-camera stream selector."""
-        if self.stream_combo is not None:
-            self.stream_combo.setVisible(visible)
-        if self.badge_label is not None:
-            self.badge_label.setVisible(visible)
-
     @property
     def is_selected(self) -> bool:
         return self.checkbox.isChecked()
-
-    def get_selected_stream(self, is_override_mode: bool, global_stream: str) -> str:
-        """Return the effective stream name for this camera."""
-        if not is_override_mode:
-            return global_stream
-        if self.stream_combo is not None:
-            data = self.stream_combo.currentData()
-            return str(data) if data is not None else "HD"
-        return "HD"
-
-    def get_track_id(self, is_override_mode: bool, global_stream: str) -> TrackId:
-        """Return the effective NVR TrackId for this camera."""
-        stream = self.get_selected_stream(is_override_mode, global_stream).lower()
-        if stream == "hd":
-            return self.camera.main_track
-        return self.camera.sub_track if int(self.camera.sub_track) > 0 else self.camera.main_track
 
 
 class MainWindow(QMainWindow):
@@ -147,6 +127,12 @@ class MainWindow(QMainWindow):
 
         # Theme state
         self._is_dark_theme: bool = True
+
+        # Apply programmatic system font to application
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            general_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+            app.setFont(general_font)
 
         # Apply application icon
         if FAVICON_SVG_PATH.exists():
@@ -207,16 +193,17 @@ class MainWindow(QMainWindow):
 
         logo_label = QLabel(self)
         if FAVICON_SVG_PATH.exists():
-            pix = QPixmap(str(FAVICON_SVG_PATH)).scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            pix = QPixmap(str(FAVICON_SVG_PATH)).scaled(30, 30, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             logo_label.setPixmap(pix)
         elif LOGO_SVG_PATH.exists():
-            pix = QPixmap(str(LOGO_SVG_PATH)).scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            pix = QPixmap(str(LOGO_SVG_PATH)).scaled(30, 30, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             logo_label.setPixmap(pix)
-        logo_label.setFixedSize(32, 32)
+        logo_label.setFixedSize(30, 30)
         brand_layout.addWidget(logo_label)
 
         title_label = QLabel("HikVision Downloader", self)
-        title_label.setStyleSheet("font-size: 16px; font-weight: 800; letter-spacing: 0.3px;")
+        title_label.setObjectName("appTitle")
+        title_label.setStyleSheet("font-size: 15px; font-weight: 800; letter-spacing: 0.3px; border: none; background: transparent;")
         brand_layout.addWidget(title_label)
         h_layout.addLayout(brand_layout)
 
@@ -231,7 +218,7 @@ class MainWindow(QMainWindow):
         form_layout.addWidget(QLabel("Host:", self))
         self.host_input = QLineEdit(self)
         self.host_input.setPlaceholderText("192.168.1.100")
-        self.host_input.setMinimumWidth(130)
+        self.host_input.setMaximumWidth(120)
         self.host_input.setText(NVR_HOST or "")
         form_layout.addWidget(self.host_input)
 
@@ -240,7 +227,7 @@ class MainWindow(QMainWindow):
         self.port_input = QSpinBox(self)
         self.port_input.setRange(1, 65535)
         self.port_input.setValue(NVR_PORT or 80)
-        self.port_input.setFixedWidth(55)
+        self.port_input.setFixedWidth(50)
         self.port_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.port_input.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
         form_layout.addWidget(self.port_input)
@@ -249,7 +236,7 @@ class MainWindow(QMainWindow):
         form_layout.addWidget(QLabel("User:", self))
         self.user_input = QLineEdit(self)
         self.user_input.setPlaceholderText("admin")
-        self.user_input.setMinimumWidth(100)
+        self.user_input.setMaximumWidth(90)
         self.user_input.setText(NVR_USERNAME or "admin")
         form_layout.addWidget(self.user_input)
 
@@ -258,7 +245,7 @@ class MainWindow(QMainWindow):
         self.password_input = QLineEdit(self)
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("••••••••")
-        self.password_input.setMinimumWidth(110)
+        self.password_input.setMaximumWidth(90)
         form_layout.addWidget(self.password_input)
 
         # Remember in Keychain Checkbox
@@ -266,9 +253,12 @@ class MainWindow(QMainWindow):
         self.remember_cb.setChecked(True)
         form_layout.addWidget(self.remember_cb)
 
+        form_layout.addSpacing(12)
+
         # Connect / Authenticate Button
         self.connect_btn = QPushButton("Connect", self)
-        self.connect_btn.setObjectName("secondaryBtn")
+        self.connect_btn.setObjectName("connectBtn")
+        self.connect_btn.setProperty("connected", "false")
         self.connect_btn.clicked.connect(self._on_connect_clicked)
         form_layout.addWidget(self.connect_btn)
 
@@ -278,12 +268,15 @@ class MainWindow(QMainWindow):
         # Status Badge Pill
         self.status_badge = QLabel("● Disconnected", self)
         self.status_badge.setObjectName("statusBadge")
-        self.status_badge.setStyleSheet("background-color: #334155; color: #94A3B8; border-radius: 12px; padding: 4px 10px; font-weight: bold;")
+        self.status_badge.setStyleSheet(
+            "background-color: #334155; color: #94A3B8; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+        )
         h_layout.addWidget(self.status_badge)
 
         # Theme Switcher Button
-        self.theme_btn = QPushButton("☀️ Light", self)
+        self.theme_btn = QPushButton("☀️", self)
         self.theme_btn.setObjectName("secondaryBtn")
+        self.theme_btn.setFixedSize(32, 26)
         self.theme_btn.setToolTip("Toggle Light/Dark Theme")
         self.theme_btn.clicked.connect(self._toggle_theme)
         h_layout.addWidget(self.theme_btn)
@@ -302,101 +295,106 @@ class MainWindow(QMainWindow):
         f_layout.setSpacing(12)
         f_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        # Arivedha Logo & Corporate Identity
         brand_layout = QHBoxLayout()
         brand_layout.setSpacing(8)
         brand_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         footer_icon = QLabel(self)
-        logo_to_use = ARIVEDHA_LOGO_SVG_PATH if ARIVEDHA_LOGO_SVG_PATH.exists() else (FAVICON_SVG_PATH if FAVICON_SVG_PATH.exists() else LOGO_SVG_PATH)
+        logo_to_use = (
+            ARIVEDHA_LOGO_SVG_PATH if ARIVEDHA_LOGO_SVG_PATH.exists() else (FAVICON_SVG_PATH if FAVICON_SVG_PATH.exists() else LOGO_SVG_PATH)
+        )
         if logo_to_use.exists():
             pix = QPixmap(str(logo_to_use)).scaled(18, 18, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             footer_icon.setPixmap(pix)
         footer_icon.setFixedSize(18, 18)
         brand_layout.addWidget(footer_icon)
 
-        footer_text = QLabel("Powered by <b>Arivedha</b>", self)
-        footer_text.setStyleSheet("color: #94A3B8; font-size: 12px;")
-        brand_layout.addWidget(footer_text)
+        footer_brand = QLabel("Arivedha Surveillance Management Suite", self)
+        footer_brand.setStyleSheet("font-size: 11px; font-weight: 600; color: #94A3B8; border: none; background: transparent;")
+        brand_layout.addWidget(footer_brand)
         f_layout.addLayout(brand_layout)
 
         f_layout.addStretch(1)
 
-        version_label = QLabel("v0.1.0 • High-Speed ISAPI Downloader", self)
-        version_label.setStyleSheet("color: #64748B; font-size: 11px;")
+        version_label = QLabel("v0.1.0-alpha • Automated ISAPI Engine", self)
+        version_label.setStyleSheet("font-size: 11px; color: #64748B; border: none; background: transparent;")
         f_layout.addWidget(version_label)
 
         self._root_layout.addWidget(footer)
 
     # =========================================================================
-    # UI Construction: Body Splitter & Panels
+    # UI Construction: Body Panels (Left Sidebar + Right Operation Area)
     # =========================================================================
 
     def _build_body_panels(self) -> None:
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        self.main_splitter.setHandleWidth(6)
+        self.main_splitter.setObjectName("mainSplitter")
 
-        # Left Control Panel
+        # Left Operational Panel (Sources & Selection Only)
         self.left_panel = QWidget(self)
-        self.left_panel.setMinimumWidth(380)
+        self.left_panel.setMinimumWidth(410)
         left_layout = QVBoxLayout(self.left_panel)
         left_layout.setContentsMargins(14, 12, 8, 12)
         left_layout.setSpacing(12)
 
-        left_scroll = QScrollArea(self.left_panel)
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # 1. Camera Channels & Stream Quality Group
+        left_layout.addWidget(self._build_camera_group())
 
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(0, 0, 4, 0)
-        scroll_layout.setSpacing(12)
+        # 2. Investigation Time Window Group
+        left_layout.addWidget(self._build_time_group())
 
-        # 1. Cameras Group
-        scroll_layout.addWidget(self._build_camera_group())
+        left_layout.addStretch(1)
 
-        # 2. Investigation Window Group
-        scroll_layout.addWidget(self._build_time_window_group())
-
-        # 3. Download Options Group
-        scroll_layout.addWidget(self._build_options_group())
-
-        # Search Segments Button
+        # 3. Pinned Search Button at bottom
         self.search_btn = QPushButton("🔍  SEARCH RECORDINGS", self)
-        self.search_btn.setObjectName("primaryActionBtn")
-        self.search_btn.setStyleSheet("background-color: #1E6B7B; font-size: 13px;")
+        self.search_btn.setObjectName("searchBtn")
         self.search_btn.clicked.connect(self._on_search_clicked)
-        scroll_layout.addWidget(self.search_btn)
+        left_layout.addWidget(self.search_btn)
 
-        scroll_layout.addStretch(1)
-        left_scroll.setWidget(scroll_content)
-        left_layout.addWidget(left_scroll)
         self.main_splitter.addWidget(self.left_panel)
 
-        # Right Operational Panel
+        # Right Operational Panel (Table, Download Settings, Actions & Logs)
         right_widget = QWidget(self)
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(8, 12, 14, 12)
         right_layout.setSpacing(10)
 
-        # Discovered Segments Table & Action Bar
+        # Top: Segments Table
         right_layout.addWidget(self._build_recordings_view_panel(), stretch=6)
 
-        # Progress Section
-        right_layout.addWidget(self._build_progress_section(), stretch=0)
+        # Middle: Download Settings Frame
+        right_layout.addWidget(self._build_download_settings_panel())
 
-        # Activity Log Console
+        # Primary Action Bar
+        action_bar = QHBoxLayout()
+        action_bar.setSpacing(10)
+
+        self.start_download_btn = QPushButton("⬇  START BATCH DOWNLOAD", self)
+        self.start_download_btn.setObjectName("downloadBtn")
+        self.start_download_btn.setEnabled(False)
+        self.start_download_btn.clicked.connect(self._on_start_download_clicked)
+        action_bar.addWidget(self.start_download_btn, stretch=3)
+
+        self.abort_btn = QPushButton("✕  CANCEL / ABORT", self)
+        self.abort_btn.setObjectName("abortBtn")
+        self.abort_btn.setEnabled(False)
+        self.abort_btn.clicked.connect(self._on_abort_clicked)
+        action_bar.addWidget(self.abort_btn, stretch=1)
+
+        right_layout.addLayout(action_bar)
+
+        # Bottom: Activity Log Console with integrated progress header
         right_layout.addWidget(self._build_console_log_panel(), stretch=4)
 
         self.main_splitter.addWidget(right_widget)
         self.main_splitter.setCollapsible(0, False)
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
-        self.main_splitter.setSizes([390, max(self.width() - 390, 750)])
+        self.main_splitter.setSizes([420, max(self.width() - 420, 750)])
         self._root_layout.addWidget(self.main_splitter, stretch=1)
 
     def _build_camera_group(self) -> QGroupBox:
-        group = QGroupBox("Camera Channels & Streams", self)
+        group = QGroupBox("Camera Channels & Stream", self)
         layout = QVBoxLayout(group)
         layout.setSpacing(8)
 
@@ -416,39 +414,11 @@ class MainWindow(QMainWindow):
 
         btn_refresh = QPushButton("Refresh Channels", self)
         btn_refresh.setObjectName("secondaryBtn")
-        btn_refresh.setMinimumWidth(120)
+        btn_refresh.setMinimumWidth(110)
         btn_refresh.clicked.connect(self._on_refresh_cameras_clicked)
         actions_layout.addWidget(btn_refresh)
 
         layout.addLayout(actions_layout)
-
-        # Stream Mode Radio Toggle
-        mode_layout = QVBoxLayout()
-        mode_layout.setSpacing(4)
-
-        self.stream_btn_group = QButtonGroup(self)
-        self.rb_global_stream = QRadioButton("Global Stream (All Cameras)", self)
-        self.rb_global_stream.setChecked(True)
-        self.stream_btn_group.addButton(self.rb_global_stream, 0)
-        mode_layout.addWidget(self.rb_global_stream)
-
-        self.rb_override_stream = QRadioButton("Per-Camera Override", self)
-        self.stream_btn_group.addButton(self.rb_override_stream, 1)
-        mode_layout.addWidget(self.rb_override_stream)
-
-        layout.addLayout(mode_layout)
-
-        # Global Stream Dropdown Bar
-        self.global_stream_bar = QHBoxLayout()
-        self.global_stream_label = QLabel("Stream Quality:", self)
-        self.global_stream_bar.addWidget(self.global_stream_label)
-        self.global_stream_combo = QComboBox(self)
-        self.global_stream_combo.addItem("HD (Main Stream)", "HD")
-        self.global_stream_combo.addItem("SD (Sub Stream)", "SD")
-        self.global_stream_bar.addWidget(self.global_stream_combo, stretch=1)
-        layout.addLayout(self.global_stream_bar)
-
-        self.stream_btn_group.idToggled.connect(self._on_stream_mode_toggled)
 
         # Camera Checklist Container (Scrollable)
         self.camera_list_container = QWidget(self)
@@ -463,78 +433,75 @@ class MainWindow(QMainWindow):
 
         self.camera_scroll = QScrollArea(self)
         self.camera_scroll.setWidgetResizable(True)
-        self.camera_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.camera_scroll.setMinimumHeight(140)
-        self.camera_scroll.setMaximumHeight(220)
         self.camera_scroll.setWidget(self.camera_list_container)
+        self.camera_scroll.setMaximumHeight(220)
         layout.addWidget(self.camera_scroll)
+
+        # Stream Quality Dropdown
+        stream_row = QHBoxLayout()
+        stream_row.setSpacing(8)
+        stream_label = QLabel("Stream Quality:", self)
+        stream_row.addWidget(stream_label)
+
+        self.stream_combo = QComboBox(self)
+        self.stream_combo.addItem("HD (Main Stream)", "HD")
+        stream_row.addWidget(self.stream_combo, stretch=1)
+        layout.addLayout(stream_row)
+
         return group
 
-    def _build_time_window_group(self) -> QGroupBox:
+    def _build_time_group(self) -> QGroupBox:
         group = QGroupBox("Investigation Time Window", self)
         layout = QVBoxLayout(group)
-        layout.setSpacing(8)
+        layout.setSpacing(10)
 
-        # Date Picker (Defaults to Yesterday with High-Contrast Calendar)
+        # Row 1: Target Date Picker
         date_layout = QHBoxLayout()
+        date_layout.setSpacing(8)
         date_layout.addWidget(QLabel("Date:", self))
         self.date_picker = QDateEdit(self)
         self.date_picker.setCalendarPopup(True)
+        self.date_picker.setDate(QDate.currentDate())
         self.date_picker.setDisplayFormat("yyyy-MM-dd")
-        yesterday = QDate.currentDate().addDays(-1)
-        self.date_picker.setDate(yesterday)
         date_layout.addWidget(self.date_picker, stretch=1)
         layout.addLayout(date_layout)
 
-        # Full Day Checkbox
-        self.full_day_cb = QCheckBox("Full Day (00:00 - 23:59)", self)
-        self.full_day_cb.setChecked(True)
-        self.full_day_cb.toggled.connect(self._on_full_day_toggled)
-        layout.addWidget(self.full_day_cb)
-
-        # Quick Time Presets
+        # Row 2: 4 Preset Buttons
         presets_bar = QHBoxLayout()
         presets_bar.setSpacing(6)
 
-        btn_morning = QPushButton("Morning", self)
-        btn_morning.setObjectName("presetBtn")
-        btn_morning.setFixedHeight(26)
-        btn_morning.clicked.connect(lambda: self._apply_time_preset("08", "00", "12", "00"))
-        presets_bar.addWidget(btn_morning)
+        btn_am = QPushButton("AM (08-12)", self)
+        btn_am.setObjectName("presetBtn")
+        btn_am.clicked.connect(lambda: self._apply_time_preset("08", "00", "12", "00"))
+        presets_bar.addWidget(btn_am)
 
-        btn_afternoon = QPushButton("Afternoon", self)
-        btn_afternoon.setObjectName("presetBtn")
-        btn_afternoon.setFixedHeight(26)
-        btn_afternoon.clicked.connect(lambda: self._apply_time_preset("12", "00", "18", "00"))
-        presets_bar.addWidget(btn_afternoon)
+        btn_noon = QPushButton("NOON (12-18)", self)
+        btn_noon.setObjectName("presetBtn")
+        btn_noon.clicked.connect(lambda: self._apply_time_preset("12", "00", "18", "00"))
+        presets_bar.addWidget(btn_noon)
 
-        btn_evening = QPushButton("Evening", self)
-        btn_evening.setObjectName("presetBtn")
-        btn_evening.setFixedHeight(26)
-        btn_evening.clicked.connect(lambda: self._apply_time_preset("18", "00", "23", "59"))
-        presets_bar.addWidget(btn_evening)
+        btn_pm = QPushButton("PM (18-24)", self)
+        btn_pm.setObjectName("presetBtn")
+        btn_pm.clicked.connect(lambda: self._apply_time_preset("18", "00", "23", "59"))
+        presets_bar.addWidget(btn_pm)
 
-        btn_fullday = QPushButton("Full Day", self)
-        btn_fullday.setObjectName("presetBtn")
-        btn_fullday.setFixedHeight(26)
-        btn_fullday.clicked.connect(lambda: self.full_day_cb.setChecked(True))
-        presets_bar.addWidget(btn_fullday)
+        btn_full = QPushButton("FULL (00-24)", self)
+        btn_full.setObjectName("presetBtn")
+        btn_full.clicked.connect(lambda: self._apply_time_preset("00", "00", "23", "59"))
+        presets_bar.addWidget(btn_full)
 
         layout.addLayout(presets_bar)
 
-        # Custom Time Range (Hours & Minutes Dropdowns)
-        self.time_range_widget = QWidget(self)
-        time_layout = QHBoxLayout(self.time_range_widget)
-        time_layout.setContentsMargins(0, 4, 0, 0)
-        time_layout.setSpacing(6)
+        # Row 3: Symmetrical Time Range (From: [HH]:[MM]  To: [HH]:[MM])
+        time_layout = QHBoxLayout()
+        time_layout.setSpacing(4)
         time_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        # From HH:MM
         time_layout.addWidget(QLabel("From:", self))
         self.start_hh_combo = QComboBox(self)
         self.start_hh_combo.addItems([f"{i:02d}" for i in range(24)])
         self.start_hh_combo.setCurrentText("00")
-        self.start_hh_combo.setFixedWidth(65)
+        self.start_hh_combo.setFixedWidth(56)
         time_layout.addWidget(self.start_hh_combo)
 
         lbl_col1 = QLabel(":", self)
@@ -546,17 +513,16 @@ class MainWindow(QMainWindow):
         self.start_mm_combo.setEditable(True)
         self.start_mm_combo.addItems([f"{i:02d}" for i in range(0, 60, 5)])
         self.start_mm_combo.setCurrentText("00")
-        self.start_mm_combo.setFixedWidth(65)
+        self.start_mm_combo.setFixedWidth(56)
         time_layout.addWidget(self.start_mm_combo)
 
         time_layout.addSpacing(12)
 
-        # To HH:MM
         time_layout.addWidget(QLabel("To:", self))
         self.end_hh_combo = QComboBox(self)
         self.end_hh_combo.addItems([f"{i:02d}" for i in range(24)])
         self.end_hh_combo.setCurrentText("23")
-        self.end_hh_combo.setFixedWidth(65)
+        self.end_hh_combo.setFixedWidth(56)
         time_layout.addWidget(self.end_hh_combo)
 
         lbl_col2 = QLabel(":", self)
@@ -568,67 +534,67 @@ class MainWindow(QMainWindow):
         self.end_mm_combo.setEditable(True)
         self.end_mm_combo.addItems([f"{i:02d}" for i in range(0, 60, 5)] + ["59"])
         self.end_mm_combo.setCurrentText("59")
-        self.end_mm_combo.setFixedWidth(65)
+        self.end_mm_combo.setFixedWidth(56)
         time_layout.addWidget(self.end_mm_combo)
 
-        self.time_range_widget.setEnabled(False)
-        layout.addWidget(self.time_range_widget)
+        layout.addLayout(time_layout)
 
         return group
 
-    def _build_options_group(self) -> QGroupBox:
-        group = QGroupBox("Download Settings", self)
-        layout = QVBoxLayout(group)
+    def _build_download_settings_panel(self) -> QFrame:
+        frame = QFrame(self)
+        frame.setObjectName("downloadSettingsFrame")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(8)
 
-        # Concurrency Slider (1-4)
-        conc_layout = QHBoxLayout()
-        conc_layout.addWidget(QLabel("Concurrent Workers:", self))
-        self.worker_label = QLabel(f"{NVR_MAX_WORKERS}", self)
-        self.worker_label.setStyleSheet("color: #38BDF8; font-weight: bold;")
-        conc_layout.addWidget(self.worker_label)
-        conc_layout.addStretch(1)
-        layout.addLayout(conc_layout)
+        # Line 1: Output Directory + Browse ToolButton + Space Validation Pill
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        row1.addWidget(QLabel("Output Directory:", self))
+
+        default_dir = resolve_default_output_dir()
+        self.output_dir_input = QLineEdit(str(default_dir), self)
+        self.output_dir_input.textChanged.connect(self._on_output_dir_changed)
+        row1.addWidget(self.output_dir_input, stretch=1)
+
+        self.browse_btn = QToolButton(self)
+        self.browse_btn.setObjectName("browseBtn")
+        self.browse_btn.setText("📂")
+        self.browse_btn.setFixedSize(32, 26)
+        self.browse_btn.setToolTip("Browse download directory")
+        self.browse_btn.clicked.connect(self._on_browse_output_dir)
+        row1.addWidget(self.browse_btn)
+
+        self.space_label = QLabel("Disk: Checking...", self)
+        self.space_label.setObjectName("spaceBadge")
+        self.space_label.setStyleSheet("background-color: #064E3B; color: #10B981; font-weight: bold;")
+        row1.addWidget(self.space_label)
+        layout.addLayout(row1)
+
+        # Line 2: Concurrent Workers + CSV Manifest Checkbox
+        row2 = QHBoxLayout()
+        row2.setSpacing(12)
+        row2.addWidget(QLabel("Concurrent Workers:", self))
 
         self.worker_slider = QSlider(Qt.Orientation.Horizontal, self)
         self.worker_slider.setRange(1, 4)
         self.worker_slider.setValue(NVR_MAX_WORKERS)
-        self.worker_slider.setTickInterval(1)
-        self.worker_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.worker_slider.valueChanged.connect(lambda v: self.worker_label.setText(str(v)))
-        layout.addWidget(self.worker_slider)
+        self.worker_slider.setFixedWidth(100)
+        self.worker_label = QLabel(f"{NVR_MAX_WORKERS} workers", self)
+        self.worker_label.setStyleSheet("color: #38BDF8; font-weight: bold; min-width: 65px;")
+        self.worker_slider.valueChanged.connect(lambda v: self.worker_label.setText(f"{v} worker{'s' if v > 1 else ''}"))
+        row2.addWidget(self.worker_slider)
+        row2.addWidget(self.worker_label)
 
-        # Output Directory Selector
-        dir_label_layout = QHBoxLayout()
-        dir_label_layout.addWidget(QLabel("Output Directory:", self))
-        layout.addLayout(dir_label_layout)
-
-        dir_input_layout = QHBoxLayout()
-        self.output_dir_input = QLineEdit(self)
-        default_dir = resolve_default_output_dir()
-        self.output_dir_input.setText(str(default_dir))
-        self.output_dir_input.setToolTip(str(default_dir))
-        self.output_dir_input.textChanged.connect(self._on_output_dir_changed)
-        dir_input_layout.addWidget(self.output_dir_input, stretch=1)
-
-        browse_btn = QPushButton("Browse...", self)
-        browse_btn.setObjectName("secondaryBtn")
-        browse_btn.setFixedWidth(85)
-        browse_btn.clicked.connect(self._on_browse_output_dir)
-        dir_input_layout.addWidget(browse_btn)
-        layout.addLayout(dir_input_layout)
-
-        # Free Space Readout
-        self.space_label = QLabel("Disk Space: Checking...", self)
-        self.space_label.setStyleSheet("font-size: 11px; color: #94A3B8;")
-        layout.addWidget(self.space_label)
-
-        # CSV Manifest
+        row2.addSpacing(16)
         self.csv_manifest_cb = QCheckBox("Generate recording-list.csv manifest", self)
         self.csv_manifest_cb.setChecked(True)
-        layout.addWidget(self.csv_manifest_cb)
+        row2.addWidget(self.csv_manifest_cb)
+        row2.addStretch(1)
+        layout.addLayout(row2)
 
-        return group
+        return frame
 
     def _build_recordings_view_panel(self) -> QWidget:
         panel = QFrame(self)
@@ -637,35 +603,15 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
-        # Top Bar: Counters and Range Selector
+        # Top Bar: Counters and Selection Actions
         top_bar = QHBoxLayout()
         top_bar.setSpacing(10)
 
-        self.summary_label = QLabel("0 segments discovered (0.0 MB) | 0 selected (0.0 MB)", self)
+        self.summary_label = QLabel("0 segments discovered (0 B) | 0 selected (0 B)", self)
         self.summary_label.setStyleSheet("font-weight: 600;")
         top_bar.addWidget(self.summary_label)
 
         top_bar.addStretch(1)
-
-        # Range Selector Controls
-        top_bar.addWidget(QLabel("Range:", self))
-        self.range_start_spin = QSpinBox(self)
-        self.range_start_spin.setRange(1, 9999)
-        self.range_start_spin.setValue(1)
-        self.range_start_spin.setFixedWidth(60)
-        top_bar.addWidget(self.range_start_spin)
-
-        top_bar.addWidget(QLabel("Count:", self))
-        self.range_count_spin = QSpinBox(self)
-        self.range_count_spin.setRange(1, 9999)
-        self.range_count_spin.setValue(10)
-        self.range_count_spin.setFixedWidth(60)
-        top_bar.addWidget(self.range_count_spin)
-
-        apply_range_btn = QPushButton("Select Range", self)
-        apply_range_btn.setObjectName("secondaryBtn")
-        apply_range_btn.clicked.connect(self._on_apply_range_clicked)
-        top_bar.addWidget(apply_range_btn)
 
         btn_all = QPushButton("Select All", self)
         btn_all.setObjectName("secondaryBtn")
@@ -700,58 +646,6 @@ class MainWindow(QMainWindow):
         self.table_view.setColumnWidth(RecordingsTableModel.COL_STATUS, 100)
 
         layout.addWidget(self.table_view)
-
-        # Primary Action Row: START BATCH DOWNLOAD and CANCEL
-        action_row = QHBoxLayout()
-        action_row.setSpacing(12)
-
-        self.start_download_btn = QPushButton("🚀  START BATCH DOWNLOAD", self)
-        self.start_download_btn.setObjectName("primaryActionBtn")
-        self.start_download_btn.setEnabled(False)
-        self.start_download_btn.clicked.connect(self._on_start_download_clicked)
-        action_row.addWidget(self.start_download_btn, stretch=3)
-
-        self.abort_btn = QPushButton("✕  CANCEL / ABORT", self)
-        self.abort_btn.setObjectName("abortBtn")
-        self.abort_btn.setEnabled(False)
-        self.abort_btn.clicked.connect(self._on_abort_clicked)
-        action_row.addWidget(self.abort_btn, stretch=1)
-
-        layout.addLayout(action_row)
-        return panel
-
-    def _build_progress_section(self) -> QWidget:
-        panel = QFrame(self)
-        panel.setObjectName("cardFrame")
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(6)
-
-        # Metrics Readout Bar
-        metrics_layout = QHBoxLayout()
-        self.prog_status_label = QLabel("Idle", self)
-        self.prog_status_label.setStyleSheet("font-weight: 600; color: #38BDF8;")
-        metrics_layout.addWidget(self.prog_status_label)
-
-        metrics_layout.addStretch(1)
-
-        self.speed_label = QLabel("0.0 Mbps", self)
-        self.speed_label.setStyleSheet("font-weight: 600; color: #F37021;")
-        metrics_layout.addWidget(self.speed_label)
-
-        metrics_layout.addSpacing(12)
-        self.time_label = QLabel("Elapsed: 00:00 | ETA: --:--", self)
-        self.time_label.setStyleSheet("color: #94A3B8; font-size: 12px;")
-        metrics_layout.addWidget(self.time_label)
-
-        layout.addLayout(metrics_layout)
-
-        # Overall Progress Bar
-        self.progress_bar = QProgressBar(self)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        layout.addWidget(self.progress_bar)
-
         return panel
 
     def _build_console_log_panel(self) -> QWidget:
@@ -761,21 +655,49 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
 
-        header_layout = QHBoxLayout()
-        header_layout.addWidget(QLabel("Live Activity Console", self))
-        header_layout.addStretch(1)
+        # Header bar with integrated telemetry progress
+        header_bar = QHBoxLayout()
+        header_bar.setSpacing(10)
+        header_bar.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        clear_btn = QPushButton("Clear Console", self)
+        console_title = QLabel("Live Activity Console", self)
+        console_title.setStyleSheet("font-weight: bold; color: #38BDF8; font-size: 12px;")
+        header_bar.addWidget(console_title)
+
+        # Integrated progress bar & telemetry indicators
+        self.overall_progress_bar = QProgressBar(self)
+        self.overall_progress_bar.setRange(0, 100)
+        self.overall_progress_bar.setValue(0)
+        self.overall_progress_bar.setFixedHeight(14)
+        self.overall_progress_bar.setMinimumWidth(100)
+        header_bar.addWidget(self.overall_progress_bar, stretch=1)
+
+        self.progress_status_label = QLabel("Idle", self)
+        self.progress_status_label.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        header_bar.addWidget(self.progress_status_label)
+
+        self.progress_speed_label = QLabel("0.0 Mbps", self)
+        self.progress_speed_label.setStyleSheet("color: #F37021; font-size: 11px; font-weight: bold;")
+        header_bar.addWidget(self.progress_speed_label)
+
+        self.progress_eta_label = QLabel("Elapsed: 00:00", self)
+        self.progress_eta_label.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        header_bar.addWidget(self.progress_eta_label)
+
+        clear_btn = QPushButton("Clear", self)
         clear_btn.setObjectName("secondaryBtn")
+        clear_btn.setFixedHeight(22)
         clear_btn.clicked.connect(self._on_clear_console)
-        header_layout.addWidget(clear_btn)
+        header_bar.addWidget(clear_btn)
 
-        layout.addLayout(header_layout)
+        layout.addLayout(header_bar)
 
         self.console_log = QPlainTextEdit(self)
         self.console_log.setObjectName("consoleLog")
         self.console_log.setReadOnly(True)
         self.console_log.setMaximumBlockCount(1000)
+        fixed_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        self.console_log.setFont(fixed_font)
         layout.addWidget(self.console_log)
 
         return panel
@@ -790,10 +712,10 @@ class MainWindow(QMainWindow):
         if isinstance(app, QApplication):
             if self._is_dark_theme:
                 app.setStyleSheet(DARK_THEME_QSS)
-                self.theme_btn.setText("☀️ Light")
+                self.theme_btn.setText("☀️")
             else:
                 app.setStyleSheet(LIGHT_THEME_QSS)
-                self.theme_btn.setText("🌙 Dark")
+                self.theme_btn.setText("🌙")
 
     # =========================================================================
     # Credential & Keychain Logic
@@ -804,7 +726,6 @@ class MainWindow(QMainWindow):
         user = self.user_input.text().strip()
         port = self.port_input.value()
 
-        # Try retrieving password from OS keychain
         if host and user:
             saved_pw = get_nvr_password(host, user, port)
             if saved_pw:
@@ -860,6 +781,10 @@ class MainWindow(QMainWindow):
     # =========================================================================
 
     def _on_connect_clicked(self) -> None:
+        if self._session is not None:
+            self._disconnect_session()
+            return
+
         host = self.host_input.text().strip()
         port = self.port_input.value()
         username = self.user_input.text().strip()
@@ -874,7 +799,9 @@ class MainWindow(QMainWindow):
 
         self.connect_btn.setEnabled(False)
         self.status_badge.setText("● Connecting...")
-        self.status_badge.setStyleSheet("background-color: #78350F; color: #F59E0B; border-radius: 12px; padding: 4px 10px; font-weight: bold;")
+        self.status_badge.setStyleSheet(
+            "background-color: #78350F; color: #F59E0B; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+        )
 
         self._auth_worker = AuthWorker(
             host=host,
@@ -893,15 +820,56 @@ class MainWindow(QMainWindow):
         if success and isinstance(session, requests.Session):
             self._session = session
             self._save_credentials_if_checked()
+            self.connect_btn.setText("Disconnect")
+            self.connect_btn.setProperty("connected", "true")
+            self.connect_btn.style().unpolish(self.connect_btn)
+            self.connect_btn.style().polish(self.connect_btn)
             self.status_badge.setText("● Connected")
-            self.status_badge.setStyleSheet("background-color: #064E3B; color: #10B981; border-radius: 12px; padding: 4px 10px; font-weight: bold;")
+            self.status_badge.setStyleSheet(
+                "background-color: #064E3B; color: #10B981; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+            )
             self._trigger_discovery(force_refresh=False)
             self._trigger_dates_discovery()
         else:
             self._session = None
+            self.connect_btn.setText("Connect")
+            self.connect_btn.setProperty("connected", "false")
+            self.connect_btn.style().unpolish(self.connect_btn)
+            self.connect_btn.style().polish(self.connect_btn)
             self.status_badge.setText("● Auth Failed")
-            self.status_badge.setStyleSheet("background-color: #7F1D1D; color: #EF4444; border-radius: 12px; padding: 4px 10px; font-weight: bold;")
+            self.status_badge.setStyleSheet(
+                "background-color: #7F1D1D; color: #EF4444; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+            )
             QMessageBox.critical(self, "Authentication Failed", f"Could not authenticate with NVR:\n{message}")
+
+    def _disconnect_session(self) -> None:
+        """Disconnect active session, stop background workers, and reset UI state."""
+        if self._download_worker is not None and self._download_worker.isRunning():
+            self._download_worker.cancel()
+        if self._search_worker is not None and self._search_worker.isRunning():
+            self._search_worker.cancel()
+        if self._discovery_worker is not None and self._discovery_worker.isRunning():
+            self._discovery_worker.quit()
+            self._discovery_worker.wait(100)
+        if self._dates_worker is not None and self._dates_worker.isRunning():
+            self._dates_worker.quit()
+            self._dates_worker.wait(100)
+        self._session = None
+        self._discovered_cameras.clear()
+        self._camera_rows.clear()
+        self._discovered_dates.clear()
+        self._rebuild_camera_checklist()
+        self._update_stream_options()
+        self._table_model.clear()
+        self.connect_btn.setText("Connect")
+        self.connect_btn.setProperty("connected", "false")
+        self.connect_btn.style().unpolish(self.connect_btn)
+        self.connect_btn.style().polish(self.connect_btn)
+        self.status_badge.setText("● Disconnected")
+        self.status_badge.setStyleSheet(
+            "background-color: #334155; color: #94A3B8; border-radius: 8px; padding: 2px 6px; font-size: 10px; font-weight: bold;"
+        )
+        self.log_message("INFO", "Disconnected from NVR session.")
 
     def _on_refresh_cameras_clicked(self) -> None:
         if self._session is None:
@@ -954,7 +922,6 @@ class MainWindow(QMainWindow):
         if cal is None:
             return
 
-        # Prepare highlighting format
         char_format = QTextCharFormat()
         char_format.setBackground(QColor("#F37021"))
         char_format.setForeground(QColor("#FFFFFF"))
@@ -969,6 +936,18 @@ class MainWindow(QMainWindow):
     def _on_discovery_cameras(self, cameras: dict[CameraNumber, Camera]) -> None:
         self._discovered_cameras = cameras
         self._rebuild_camera_checklist()
+        self._update_stream_options()
+
+    def _update_stream_options(self) -> None:
+        """Update stream quality dropdown based on discovered camera tracks."""
+        has_sub = any(int(cam.sub_track) > 0 or (cam.tracks and "sub" in cam.tracks) for cam in self._discovered_cameras.values())
+        curr = str(self.stream_combo.currentData() or "HD")
+        self.stream_combo.clear()
+        self.stream_combo.addItem("HD (Main Stream)", "HD")
+        if has_sub:
+            self.stream_combo.addItem("SD (Sub Stream)", "SD")
+            if curr == "SD":
+                self.stream_combo.setCurrentIndex(1)
 
     def _rebuild_camera_checklist(self) -> None:
         for row_widget in self._camera_rows:
@@ -981,11 +960,9 @@ class MainWindow(QMainWindow):
             return
 
         self.empty_cam_label.setVisible(False)
-        is_override = self.rb_override_stream.isChecked()
 
         for _, camera in sorted(self._discovered_cameras.items(), key=lambda x: int(x[0])):
             row = CameraRowWidget(camera, self.camera_list_container)
-            row.set_override_mode(is_override)
             self.camera_list_layout.addWidget(row)
             self._camera_rows.append(row)
 
@@ -993,20 +970,7 @@ class MainWindow(QMainWindow):
         for row in self._camera_rows:
             row.checkbox.setChecked(checked)
 
-    def _on_stream_mode_toggled(self, button_id: int, checked: bool) -> None:
-        if not checked:
-            return
-        is_override = button_id == 1
-        self.global_stream_combo.setEnabled(not is_override)
-        self.global_stream_label.setEnabled(not is_override)
-        for row in self._camera_rows:
-            row.set_override_mode(is_override)
-
-    def _on_full_day_toggled(self, checked: bool) -> None:
-        self.time_range_widget.setEnabled(not checked)
-
     def _apply_time_preset(self, start_hh: str, start_mm: str, end_hh: str, end_mm: str) -> None:
-        self.full_day_cb.setChecked(False)
         self.start_hh_combo.setCurrentText(start_hh)
         self.start_mm_combo.setCurrentText(start_mm)
         self.end_hh_combo.setCurrentText(end_hh)
@@ -1031,15 +995,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Not Connected", "Please connect and authenticate with NVR first.")
             return
 
-        is_override = self.rb_override_stream.isChecked()
-        global_stream = str(self.global_stream_combo.currentData() or "HD")
+        selected_stream = str(self.stream_combo.currentData() or "HD")
 
         selected_cameras: list[tuple[Camera, str, TrackId]] = []
         for row in self._camera_rows:
             if row.is_selected:
-                stream = row.get_selected_stream(is_override, global_stream)
-                track_id = row.get_track_id(is_override, global_stream)
-                selected_cameras.append((row.camera, stream, track_id))
+                if selected_stream.upper() == "SD":
+                    track_id = row.camera.sub_track if int(row.camera.sub_track) > 0 else row.camera.main_track
+                else:
+                    track_id = row.camera.main_track
+                selected_cameras.append((row.camera, selected_stream, track_id))
 
         if not selected_cameras:
             QMessageBox.warning(self, "No Cameras Selected", "Please select at least one camera channel to search.")
@@ -1048,16 +1013,12 @@ class MainWindow(QMainWindow):
         qdate = self.date_picker.date()
         target_date = date(qdate.year(), qdate.month(), qdate.day())
 
-        if self.full_day_cb.isChecked():
-            start_iso = f"{target_date.isoformat()}T00:00:00Z"
-            end_iso = f"{target_date.isoformat()}T23:59:59Z"
-        else:
-            s_hh = int(self.start_hh_combo.currentText() or "0")
-            s_mm = int(self.start_mm_combo.currentText() or "0")
-            e_hh = int(self.end_hh_combo.currentText() or "23")
-            e_mm = int(self.end_mm_combo.currentText() or "59")
-            start_iso = f"{target_date.isoformat()}T{s_hh:02d}:{s_mm:02d}:00Z"
-            end_iso = f"{target_date.isoformat()}T{e_hh:02d}:{e_mm:02d}:59Z"
+        s_hh = int(self.start_hh_combo.currentText() or "0")
+        s_mm = int(self.start_mm_combo.currentText() or "0")
+        e_hh = int(self.end_hh_combo.currentText() or "23")
+        e_mm = int(self.end_mm_combo.currentText() or "59")
+        start_iso = f"{target_date.isoformat()}T{s_hh:02d}:{s_mm:02d}:00Z"
+        end_iso = f"{target_date.isoformat()}T{e_hh:02d}:{e_mm:02d}:59Z"
 
         self._table_model.clear()
         self.search_btn.setEnabled(False)
@@ -1094,7 +1055,7 @@ class MainWindow(QMainWindow):
 
         new_items: list[RecordingItem] = []
         for rec in recordings:
-            if hasattr(rec, "name"):
+            if hasattr(rec, "name") and hasattr(rec, "size_bytes"):
                 new_items.append(
                     RecordingItem(
                         recording=rec,  # type: ignore[arg-type]
@@ -1111,7 +1072,9 @@ class MainWindow(QMainWindow):
 
     def _on_search_finished(self, total_count: int) -> None:
         self.search_btn.setEnabled(True)
-        self._update_space_validation()
+        self._on_table_data_changed()
+        if total_count == 0:
+            self.log_message("INFO", "Search finished: No recordings found matching the specified time window.")
 
     # =========================================================================
     # Table & Pre-flight Space Validation
@@ -1130,24 +1093,28 @@ class MainWindow(QMainWindow):
         self._update_space_validation()
 
     def _update_space_validation(self) -> None:
-        out_dir = self.output_dir_input.text().strip()
+        out_text = self.output_dir_input.text().strip()
+        if not out_text:
+            self.space_label.setText("Disk: Invalid path")
+            self.space_label.setStyleSheet(
+                "background-color: #7F1D1D; color: #EF4444; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold;"
+            )
+            return
+
+        out_path = Path(out_text)
         selected_bytes = self._table_model.get_total_selected_size()
-        has_space, req_b, free_b = check_disk_space(out_dir or ".", selected_bytes)
+        has_space, req_b, free_b = check_disk_space(out_path, selected_bytes)
 
-        if free_b == 0:
-            self.space_label.setText("Disk Space: Unable to query volume")
-            self.space_label.setStyleSheet("font-size: 11px; color: #94A3B8;")
-        elif has_space:
-            self.space_label.setText(f"Disk Space: {format_size_human(free_b)} Free | Required: {format_size_human(req_b)} (OK ✓)")
-            self.space_label.setStyleSheet("font-size: 11px; color: #10B981; font-weight: 600;")
+        if has_space:
+            self.space_label.setText(f"Disk: {format_size_human(free_b)} Free ✓")
+            self.space_label.setStyleSheet(
+                "background-color: #064E3B; color: #10B981; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold;"
+            )
         else:
-            self.space_label.setText(f"Disk Space: Insufficient! {format_size_human(free_b)} Free vs {format_size_human(req_b)} Required ⚠")
-            self.space_label.setStyleSheet("font-size: 11px; color: #EF4444; font-weight: bold;")
-
-    def _on_apply_range_clicked(self) -> None:
-        start_idx = self.range_start_spin.value()
-        count = self.range_count_spin.value()
-        self._table_model.select_range(start_idx, count)
+            self.space_label.setText(f"Disk: Insufficient! ({format_size_human(free_b)} Free vs {format_size_human(req_b)} Req) ⚠")
+            self.space_label.setStyleSheet(
+                "background-color: #7F1D1D; color: #EF4444; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold;"
+            )
 
     # =========================================================================
     # Event Handlers: Downloads & Cancellation
@@ -1181,8 +1148,8 @@ class MainWindow(QMainWindow):
         self.start_download_btn.setEnabled(False)
         self.abort_btn.setEnabled(True)
         self.search_btn.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self.prog_status_label.setText("Preparing batch download...")
+        self.overall_progress_bar.setValue(0)
+        self.progress_status_label.setText("Preparing batch download...")
 
         host = self.host_input.text().strip()
         port = self.port_input.value()
@@ -1212,12 +1179,12 @@ class MainWindow(QMainWindow):
         percent = int(((curr_idx - 1) + (prog.bytes_downloaded / max(prog.file_size_bytes, 1))) / total_files * 100)
         percent = max(0, min(percent, 100))
 
-        self.progress_bar.setValue(percent)
-        self.prog_status_label.setText(f"Downloading [{curr_idx}/{total_files}]: {prog.filename}")
-        self.speed_label.setText(f"{float(prog.speed_mbps):.1f} Mbps")
+        self.overall_progress_bar.setValue(percent)
+        self.progress_status_label.setText(f"[{curr_idx}/{total_files}] {prog.filename}")
+        self.progress_speed_label.setText(f"{float(prog.speed_mbps):.1f} Mbps")
 
         elapsed_str = time.strftime("%M:%S", time.gmtime(prog.elapsed_seconds))
-        self.time_label.setText(f"File Elapsed: {elapsed_str}")
+        self.progress_eta_label.setText(f"Elapsed: {elapsed_str}")
 
         self._table_model.update_item_status(
             filename=prog.filename,
@@ -1232,10 +1199,11 @@ class MainWindow(QMainWindow):
         self.start_download_btn.setEnabled(True)
         self.abort_btn.setEnabled(False)
         self.search_btn.setEnabled(True)
-        self.progress_bar.setValue(100 if result.success else self.progress_bar.value())
+        self.overall_progress_bar.setValue(100 if result.success else self.overall_progress_bar.value())
 
-        status_text = "Download Complete" if result.success else ("Cancelled" if "cancelled" in str(result.error_message).lower() else "Failed")
-        self.prog_status_label.setText(f"{status_text} ({result.downloaded_files} saved, {result.skipped_files} skipped)")
+        status_text = "Complete" if result.success else ("Cancelled" if "cancelled" in str(result.error_message).lower() else "Failed")
+        self.progress_status_label.setText(f"{status_text} ({result.downloaded_files} downloaded, {result.skipped_files} skipped)")
+        self.progress_speed_label.setText("0.0 Mbps")
 
         if result.success:
             QMessageBox.information(
@@ -1257,6 +1225,13 @@ class MainWindow(QMainWindow):
         if self._search_worker is not None and self._search_worker.isRunning():
             self._search_worker.cancel()
 
+    def showEvent(self, event: QShowEvent) -> None:
+        """Ensure splitter sizes and non-collapsible left panel upon first display."""
+        super().showEvent(event)
+        if hasattr(self, "main_splitter"):
+            self.main_splitter.setSizes([420, max(self.width() - 420, 750)])
+            self.main_splitter.setCollapsible(0, False)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """Ensure background threads are terminated safely on window close."""
         if self._download_worker is not None and self._download_worker.isRunning():
@@ -1272,9 +1247,14 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     """Entry point for the PySide6 Desktop GUI."""
-    app = QApplication(sys.argv)
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication(sys.argv)
     app.setApplicationName("HikVision Downloader")
     app.setOrganizationName("Arivedha")
+
+    general_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+    app.setFont(general_font)
     app.setStyleSheet(DARK_THEME_QSS)
 
     window = MainWindow()

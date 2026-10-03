@@ -355,7 +355,6 @@ def download_recordings_concurrent(
             )
         ]
 
-
         for future in as_completed(futures):
             try:
                 offset, success, _duration, actual_size, is_skipped, error_msg = future.result()

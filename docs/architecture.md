@@ -95,13 +95,17 @@ MegabitsPerSecond = NewType("MegabitsPerSecond", float)
 ISODatetimeStr = NewType("ISODatetimeStr", str)
 NVRHost = NewType("NVRHost", str)
 
+
 class StreamType(StrEnum):
     """Internal stream identifier."""
+
     MAIN = "main"
     SUB = "sub"
 
+
 class StreamQuality(StrEnum):
     """Human-readable display/archive stream descriptor."""
+
     HD = "HD"
     SD = "SD"
 ```
@@ -175,13 +179,16 @@ class Recording:
 ```python
 class NVRAuthCredentials(BaseModel):
     """Encapsulates NVR credentials with secret masking."""
+
     host: str
     username: str
     password: SecretStr
     port: int = Field(default=80, ge=1, le=65535)
 
+
 class NVRConnectionProfile(BaseModel):
     """Stored profile metadata."""
+
     name: str
     host: str
     username: str
@@ -200,6 +207,7 @@ class DownloadProgress:
     speed_mbps: MegabitsPerSecond
     elapsed_seconds: float
     is_skipped: bool = False
+
 
 @dataclass(frozen=True)
 class DownloadResult:
@@ -223,6 +231,7 @@ The core download engine does not depend on any specific UI or CLI library. It c
 ```python
 ProgressCallback = Callable[[DownloadProgress], None]
 
+
 def download_recordings(
     session: requests.Session,
     recordings: list[Recording],
@@ -232,8 +241,7 @@ def download_recordings(
     count: int,
     progress_callback: ProgressCallback | None = None,
     cancel_event: threading.Event | None = None,
-) -> DownloadResult:
-    ...
+) -> DownloadResult: ...
 ```
 
 ### 4.2 PySide6 Asynchronous Worker Pattern

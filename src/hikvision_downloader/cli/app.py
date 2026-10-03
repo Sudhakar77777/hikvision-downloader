@@ -185,7 +185,6 @@ def parse_stream_type(stream_str: str) -> str | StreamType:
     raise ValueError(f"Invalid stream type '{stream_str}'. Expected 'main', 'sub', 'third', track ID, or stream number.")
 
 
-
 def parse_range_spec(range_str: str | None, total: int) -> tuple[int, int]:
     """Parse a download range specification into (start, count) tuple."""
     if total < 1:
@@ -231,9 +230,7 @@ def parse_range_spec(range_str: str | None, total: int) -> tuple[int, int]:
         if count_num < 1:
             raise ValueError(f"Count must be >= 1, got {count_num}")
         if start_num + count_num - 1 > total:
-            raise ValueError(
-                f"Range {start_num} to {start_num + count_num - 1} exceeds available recordings count {total}"
-            )
+            raise ValueError(f"Range {start_num} to {start_num + count_num - 1} exceeds available recordings count {total}")
 
         return start_num, count_num
 
@@ -255,7 +252,7 @@ def resolve_camera(cameras: dict[CameraNumber, Camera], camera_spec: str | int) 
         camera_num = CameraNumber(num)
         if camera_num in cameras:
             return cameras[camera_num]
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
 
     # Attempt 2: Match by name or display name (case-insensitive)
@@ -345,9 +342,9 @@ def search_recordings_for_date(
     return recordings, duration
 
 
-
 def setup_signal_handler(cancel_event: threading.Event) -> None:
     """Register signal handlers for SIGINT to ensure graceful interruption and cleanup."""
+
     def sigint_handler(signum: int, frame: FrameType | None) -> None:
         if not cancel_event.is_set():
             cancel_event.set()
@@ -539,9 +536,7 @@ def run_app(argv: Sequence[str] | None = None) -> int:
         track_id = camera.track_id(stream)
         stream_name = camera.stream_name(stream)
         destination_dir: Path = (
-            args.output_dir
-            if args.output_dir is not None
-            else OUTPUT_ROOT / f"{recording_date:%Y%m%d}_{camera.archive_name}_{stream_name}"
+            args.output_dir if args.output_dir is not None else OUTPUT_ROOT / f"{recording_date:%Y%m%d}_{camera.archive_name}_{stream_name}"
         )
 
         list_file = save_recording_list(
@@ -561,7 +556,6 @@ def run_app(argv: Sequence[str] | None = None) -> int:
         else:
             print(f"Recording list saved to: {list_file}")
             display_recording_list(recordings)
-
 
         # --------------------------------------------------------
         # 9. Range Selection (Headless vs Interactive)
@@ -655,7 +649,6 @@ def run_app(argv: Sequence[str] | None = None) -> int:
         return 1
 
 
-
 def main() -> None:
     """Console script entry point."""
     exit_code = run_app(sys.argv[1:])
@@ -664,4 +657,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
