@@ -1728,6 +1728,8 @@ class MainWindow(QMainWindow):
 
         host = self.host_input.text()
         port = self.port_input.value()
+        username = self.user_input.text()
+        password = self.password_input.text()
         workers = self.worker_slider.value()
         save_csv = self.csv_manifest_cb.isChecked()
 
@@ -1745,9 +1747,11 @@ class MainWindow(QMainWindow):
                 w.container.setVisible(False)
 
         self._download_worker = DownloadWorker(
-            session=self._session,
             host=host,
             port=port,
+            username=username,
+            password=password,
+            auth_type=NVR_AUTH_TYPE,
             selected_items=selected_items,
             output_root=out_path,
             max_workers=workers,
@@ -1782,7 +1786,7 @@ class MainWindow(QMainWindow):
         self._table_model.update_item_status(filename=filename, status="Downloading")
         self._update_multi_worker_progress()
 
-    def _on_download_progress(self, prog: DownloadProgress) -> None:
+    def _on_download_progress(self, worker_id: int, prog: DownloadProgress) -> None:
         """Update live percentage in row status, per-worker visual progress bar, and overall batch summary."""
         if self._total_batch_files == 0 and prog.total_files > 0:
             self._total_batch_files = prog.total_files
@@ -1797,16 +1801,6 @@ class MainWindow(QMainWindow):
             status=status_str,
             bytes_downloaded=int(prog.bytes_downloaded),
         )
-
-        worker_id = self._file_to_worker.get(prog.filename)
-        if worker_id is None:
-            for wid, act in self._worker_activities.items():
-                if act.filename == prog.filename or prog.filename.endswith(act.filename) or act.filename.endswith(prog.filename):
-                    worker_id = wid
-                    break
-        if worker_id is None:
-            worker_id = 1
-            self._file_to_worker[prog.filename] = 1
 
         if worker_id not in self._worker_activities:
             self._worker_activities[worker_id] = WorkerActivity(worker_id=worker_id)

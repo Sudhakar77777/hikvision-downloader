@@ -246,7 +246,7 @@ def download_recordings(
 ```
 
 ### 4.2 PySide6 Asynchronous Worker Pattern
-In the desktop GUI, background operations (date discovery, CMSearch, and media downloads) are executed inside a dedicated `QThread` to prevent blocking the Qt event loop:
+In the desktop GUI, background operations (date discovery, CMSearch, and media downloads) are executed inside a dedicated `QThread` to prevent blocking the Qt event loop. For multi-threaded batch downloads, `DownloadWorker` provisions dedicated authenticated HTTP sessions per worker slot to ensure connection isolation and prevent HTTP Digest nonce contention across concurrent streams:
 
 ```
 ┌─────────────────────────────────┐           ┌─────────────────────────────────┐
@@ -258,7 +258,7 @@ In the desktop GUI, background operations (date discovery, CMSearch, and media d
                  ├────────────────────────────────────────────►│
                  │                                             │ 2. Core download loop
                  │                                             │    updates chunk progress
-                 │ 3. emit signal_progress(DownloadProgress)   │
+                 │ 3. emit signal_progress(wid, DownloadProg)  │
                  │◄────────────────────────────────────────────┤
                  │ 4. Update UI progress bar & speed label     │
                  │                                             │

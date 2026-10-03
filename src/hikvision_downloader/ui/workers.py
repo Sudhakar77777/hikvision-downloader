@@ -319,7 +319,7 @@ class DownloadWorker(QThread):
 
     signal_started = Signal()
     signal_file_started = Signal(str, int)  # filename, worker_id
-    signal_progress = Signal(object)  # DownloadProgress
+    signal_progress = Signal(int, object)  # worker_id: int, progress: DownloadProgress
     signal_file_completed = Signal(str, str, bool)  # filename, status, is_skipped
     signal_finished = Signal(object)  # DownloadResult
     signal_error = Signal(str)
@@ -327,21 +327,25 @@ class DownloadWorker(QThread):
 
     def __init__(
         self,
-        session: requests.Session,
         host: str,
         port: int,
-        selected_items: list[RecordingItem],
-        output_root: Path,
+        username: str,
+        password: str | SecretStr,
+        auth_type: str = "digest",
+        selected_items: list[RecordingItem] | None = None,
+        output_root: Path | None = None,
         max_workers: int = 2,
         save_csv: bool = True,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self.session = session
-        self.host = host
+        self.host = host.strip()
         self.port = port
-        self.selected_items = list(selected_items)
-        self.output_root = Path(output_root)
+        self.username = username.strip()
+        self.password = password
+        self.auth_type = auth_type
+        self.selected_items = list(selected_items) if selected_items is not None else []
+        self.output_root = Path(output_root) if output_root is not None else Path.cwd()
         self.max_workers = max(1, min(max_workers, 4))
         self.save_csv = save_csv
         self._cancel_event = threading.Event()
@@ -372,6 +376,17 @@ class DownloadWorker(QThread):
             "INFO",
             f"Initiating batch download: {total_files} segments ({total_bytes / (1024 * 1024):.1f} MB) using {self.max_workers} concurrent workers...",
         )
+
+        # Pre-allocate isolated authenticated sessions per worker slot
+        worker_sessions: dict[int, requests.Session] = {}
+        for wid in range(1, self.max_workers + 1):
+            worker_sessions[wid] = create_authenticated_session(
+                host=self.host,
+                port=self.port,
+                username=self.username,
+                password=self.password,
+                auth_type=self.auth_type,
+            )
 
         # Group items by camera, stream, and date for proper subfolder organisation
         groups: dict[tuple[int, str, str, str], list[tuple[int, RecordingItem]]] = {}
@@ -423,10 +438,6 @@ class DownloadWorker(QThread):
         for wid in range(1, self.max_workers + 1):
             worker_id_queue.put(wid)
 
-        # Thread-safe progress adapter
-        def _progress_adapter(prog: DownloadProgress) -> None:
-            self.signal_progress.emit(prog)
-
         def _download_task(
             global_idx: int,
             local_idx: int,
@@ -438,7 +449,17 @@ class DownloadWorker(QThread):
                 return global_idx, item, target_filename, False, 0.0, ByteCount(0), False, "Download cancelled", False
 
             worker_id = worker_id_queue.get()
+            session = worker_sessions[worker_id]
             destination = dest_dir / target_filename
+            last_emit_time = 0.0
+
+            def _progress_adapter(prog: DownloadProgress) -> None:
+                nonlocal last_emit_time
+                now = time.monotonic()
+                if prog.is_completed or prog.is_skipped or (now - last_emit_time >= 0.1):
+                    last_emit_time = now
+                    self.signal_progress.emit(worker_id, prog)
+
             try:
                 if self._cancel_event.is_set():
                     return global_idx, item, target_filename, False, 0.0, ByteCount(0), False, "Download cancelled", False
@@ -447,7 +468,7 @@ class DownloadWorker(QThread):
                 self.signal_log.emit("INFO", f"[Worker {worker_id}] [{global_idx}/{total_files}] Downloading {target_filename}...")
 
                 success, duration, actual_size, is_skipped, err = download_recording(
-                    session=self.session,
+                    session=session,
                     host=self.host,
                     recording=item.recording,
                     track_id=item.track_id,
@@ -463,56 +484,63 @@ class DownloadWorker(QThread):
             finally:
                 worker_id_queue.put(worker_id)
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_item = {
-                executor.submit(_download_task, g_idx, l_idx, itm, d_dir, t_name): (g_idx, itm, t_name)
-                for g_idx, l_idx, itm, d_dir, t_name in work_items
-            }
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                future_to_item = {
+                    executor.submit(_download_task, g_idx, l_idx, itm, d_dir, t_name): (g_idx, itm, t_name)
+                    for g_idx, l_idx, itm, d_dir, t_name in work_items
+                }
 
-            for future in as_completed(future_to_item):
+                for future in as_completed(future_to_item):
+                    try:
+                        g_idx, item, target_filename, success, duration, actual_size, is_skipped, err, was_started = future.result()
+                    except (requests.RequestException, OSError, RuntimeError, ValueError) as exc:
+                        g_idx, item, target_filename = future_to_item[future]
+                        success = False
+                        duration = 0.0
+                        actual_size = ByteCount(0)
+                        is_skipped = False
+                        err = str(exc)
+                        was_started = True
+
+                    with lock:
+                        if not was_started:
+                            # Task was never started before cancellation; remains Pending without marking or error logging
+                            continue
+
+                        if not success:
+                            if self._cancel_event.is_set() and (err == "Download cancelled" or failed_idx is None):
+                                # Active in-flight file was cleanly cancelled by operator
+                                aborted_count += 1
+                                self.signal_file_completed.emit(item.filename, "Aborted", False)
+                            else:
+                                # Genuine download failure
+                                if failed_idx is None:
+                                    failed_idx = g_idx
+                                    error_msg = err or "Download failed"
+                                    self._cancel_event.set()
+                                self.signal_file_completed.emit(item.filename, "Failed", False)
+                                self.signal_log.emit("ERROR", f"Failed {target_filename}: {err}")
+                        else:
+                            if is_skipped:
+                                skipped_count += 1
+                                self.signal_file_completed.emit(item.filename, "Skipped", True)
+                                self.signal_log.emit("SKIP", f"Skipped (already exists): {target_filename}")
+                            else:
+                                downloaded_count += 1
+                                downloaded_bytes += int(actual_size)
+                                self.signal_file_completed.emit(item.filename, "Completed", False)
+                                speed_mbps = (int(actual_size) * 8.0 / duration / 1_000_000.0) if duration > 0 else 0.0
+                                self.signal_log.emit(
+                                    "SUCCESS",
+                                    f"Saved {target_filename} ({int(actual_size) / (1024 * 1024):.1f} MB in {duration:.1f}s, {speed_mbps:.1f} Mbps)",
+                                )
+        finally:
+            for sess in worker_sessions.values():
                 try:
-                    g_idx, item, target_filename, success, duration, actual_size, is_skipped, err, was_started = future.result()
-                except (requests.RequestException, OSError, RuntimeError, ValueError) as exc:
-                    g_idx, item, target_filename = future_to_item[future]
-                    success = False
-                    duration = 0.0
-                    actual_size = ByteCount(0)
-                    is_skipped = False
-                    err = str(exc)
-                    was_started = True
-
-                with lock:
-                    if not was_started:
-                        # Task was never started before cancellation; remains Pending without marking or error logging
-                        continue
-
-                    if not success:
-                        if self._cancel_event.is_set() and (err == "Download cancelled" or failed_idx is None):
-                            # Active in-flight file was cleanly cancelled by operator
-                            aborted_count += 1
-                            self.signal_file_completed.emit(item.filename, "Aborted", False)
-                        else:
-                            # Genuine download failure
-                            if failed_idx is None:
-                                failed_idx = g_idx
-                                error_msg = err or "Download failed"
-                                self._cancel_event.set()
-                            self.signal_file_completed.emit(item.filename, "Failed", False)
-                            self.signal_log.emit("ERROR", f"Failed {target_filename}: {err}")
-                    else:
-                        if is_skipped:
-                            skipped_count += 1
-                            self.signal_file_completed.emit(item.filename, "Skipped", True)
-                            self.signal_log.emit("SKIP", f"Skipped (already exists): {target_filename}")
-                        else:
-                            downloaded_count += 1
-                            downloaded_bytes += int(actual_size)
-                            self.signal_file_completed.emit(item.filename, "Completed", False)
-                            speed_mbps = (int(actual_size) * 8.0 / duration / 1_000_000.0) if duration > 0 else 0.0
-                            self.signal_log.emit(
-                                "SUCCESS",
-                                f"Saved {target_filename} ({int(actual_size) / (1024 * 1024):.1f} MB in {duration:.1f}s, {speed_mbps:.1f} Mbps)",
-                            )
+                    sess.close()
+                except (requests.RequestException, OSError):
+                    pass
 
         total_duration = time.monotonic() - batch_start_time
 

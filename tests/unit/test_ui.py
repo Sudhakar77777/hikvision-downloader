@@ -548,7 +548,12 @@ def test_download_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session = requests.Session()
+    created_sessions: list[requests.Session] = []
+
+    def mock_create_session(*args: object, **kwargs: object) -> requests.Session:
+        s = requests.Session()
+        created_sessions.append(s)
+        return s
 
     def mock_download_recording(*args: object, **kwargs: object) -> tuple[bool, float, ByteCount, bool, str | None]:
         dest: Path = kwargs["destination"]  # type: ignore[assignment]
@@ -556,12 +561,15 @@ def test_download_worker(
         dest.write_bytes(b"x" * 1024)
         return True, 0.1, ByteCount(1024), False, None
 
+    monkeypatch.setattr("hikvision_downloader.ui.workers.create_authenticated_session", mock_create_session)
     monkeypatch.setattr("hikvision_downloader.ui.workers.download_recording", mock_download_recording)
 
     worker = DownloadWorker(
-        session=session,
         host="192.168.1.100",
         port=80,
+        username="admin",
+        password="password123",
+        auth_type="digest",
         selected_items=[sample_recording_item],
         output_root=tmp_path,
         max_workers=2,
@@ -569,14 +577,17 @@ def test_download_worker(
     )
 
     started_files: list[tuple[str, int]] = []
+    progress_events: list[tuple[int, DownloadProgress]] = []
     completed_files: list[tuple[str, str, bool]] = []
     final_results: list[DownloadResult] = []
 
     worker.signal_file_started.connect(lambda f, wid: started_files.append((f, wid)), Qt.ConnectionType.DirectConnection)
+    worker.signal_progress.connect(lambda wid, prog: progress_events.append((wid, prog)), Qt.ConnectionType.DirectConnection)
     worker.signal_file_completed.connect(lambda f, s, sk: completed_files.append((f, s, sk)), Qt.ConnectionType.DirectConnection)
     worker.signal_finished.connect(lambda res: final_results.append(res), Qt.ConnectionType.DirectConnection)
 
     worker.run()
+    assert len(created_sessions) == 2
     assert len(started_files) == 1
     assert started_files[0][0] == sample_recording_item.filename
     assert started_files[0][1] in (1, 2)
@@ -857,7 +868,7 @@ def test_console_3tier_hierarchy_and_progress(qapp: QApplication) -> None:
         is_completed=False,
         is_skipped=False,
     )
-    window._on_download_progress(prog)
+    window._on_download_progress(1, prog)
     assert window.overall_progress_bar.value() == 25  # (0 + 0.5) / 2 = 25%
     assert "Files" in window.progress_readout.text()
     assert window._worker_widgets[1].progress_bar.value() == 50
@@ -1023,7 +1034,7 @@ def test_download_worker_concurrent_two_workers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify that setting Concurrent Workers to 2 actively downloads 2 files concurrently."""
+    """Verify that setting Concurrent Workers to 2 actively downloads 2 files concurrently with isolated sessions."""
     rec1 = Recording(
         start=ISODatetimeStr("2026-10-02T10:00:00Z"),
         end=ISODatetimeStr("2026-10-02T10:30:00Z"),
@@ -1044,12 +1055,15 @@ def test_download_worker_concurrent_two_workers(
     simultaneous_active = 0
     max_simultaneous = 0
     lock = threading.Lock()
+    used_sessions: set[requests.Session] = set()
 
     def mock_concurrent_download(*args: object, **kwargs: object) -> tuple[bool, float, ByteCount, bool, str | None]:
         nonlocal simultaneous_active, max_simultaneous
+        session_arg = kwargs["session"]
         with lock:
             simultaneous_active += 1
             max_simultaneous = max(max_simultaneous, simultaneous_active)
+            used_sessions.add(session_arg)  # type: ignore[arg-type]
 
         time.sleep(0.05)
         dest: Path = kwargs["destination"]  # type: ignore[assignment]
@@ -1063,11 +1077,12 @@ def test_download_worker_concurrent_two_workers(
 
     monkeypatch.setattr("hikvision_downloader.ui.workers.download_recording", mock_concurrent_download)
 
-    session = requests.Session()
     worker = DownloadWorker(
-        session=session,
         host="192.168.1.100",
         port=80,
+        username="admin",
+        password="secretpassword",
+        auth_type="digest",
         selected_items=[item1, item2],
         output_root=tmp_path,
         max_workers=2,
@@ -1075,10 +1090,12 @@ def test_download_worker_concurrent_two_workers(
     )
 
     started_events: list[tuple[str, int]] = []
+    progress_events: list[tuple[int, DownloadProgress]] = []
     completed_events: list[tuple[str, str, bool]] = []
     final_results: list[DownloadResult] = []
 
     worker.signal_file_started.connect(lambda f, wid: started_events.append((f, wid)), Qt.ConnectionType.DirectConnection)
+    worker.signal_progress.connect(lambda wid, prog: progress_events.append((wid, prog)), Qt.ConnectionType.DirectConnection)
     worker.signal_file_completed.connect(lambda f, s, sk: completed_events.append((f, s, sk)), Qt.ConnectionType.DirectConnection)
     worker.signal_finished.connect(lambda res: final_results.append(res), Qt.ConnectionType.DirectConnection)
 
@@ -1086,7 +1103,8 @@ def test_download_worker_concurrent_two_workers(
 
     assert len(started_events) == 2
     worker_ids = {wid for _, wid in started_events}
-    assert worker_ids.issubset({1, 2})
+    assert worker_ids == {1, 2}
+    assert len(used_sessions) == 2
     assert len(completed_events) == 2
     assert max_simultaneous == 2
     assert len(final_results) == 1
@@ -1179,7 +1197,7 @@ def test_main_window_multi_worker_progress_reporting(
         speed_mbps=MegabitsPerSecond(25.6),
         elapsed_seconds=1.0,
     )
-    window._on_download_progress(prog1)
+    window._on_download_progress(1, prog1)
 
     # Progress for Worker 2: 12% at 2.9 MB/s (23.2 Mbps)
     prog2 = DownloadProgress(
@@ -1191,7 +1209,7 @@ def test_main_window_multi_worker_progress_reporting(
         speed_mbps=MegabitsPerSecond(23.2),
         elapsed_seconds=1.0,
     )
-    window._on_download_progress(prog2)
+    window._on_download_progress(2, prog2)
 
     assert window._worker_widgets[1].progress_bar.value() == 45
     assert "[cam1_segment1.mp4] · 45% (3.2 MB/s)" in window._worker_widgets[1].detail_label.text()
@@ -1281,11 +1299,12 @@ def test_download_worker_cancellation_state_purge_10_files(
 
     monkeypatch.setattr("hikvision_downloader.ui.workers.download_recording", mock_cancellable_download)
 
-    session = requests.Session()
     worker = DownloadWorker(
-        session=session,
         host="192.168.1.100",
         port=80,
+        username="admin",
+        password="password123",
+        auth_type="digest",
         selected_items=items,
         output_root=tmp_path,
         max_workers=2,
@@ -1385,6 +1404,10 @@ def test_main_window_cancellation_ui_purge(
     monkeypatch.setattr("hikvision_downloader.ui.workers.download_recording", mock_download_with_cancel)
 
     window = MainWindow()
+    window.host_input.setText("192.168.1.100")
+    window.port_input.setValue(80)
+    window.user_input.setText("admin")
+    window.password_input.setText("secret")
     window._session = requests.Session()
     window.output_dir_input.setText(str(tmp_path))
     window.worker_slider.setValue(2)
@@ -1424,6 +1447,114 @@ def test_main_window_cancellation_ui_purge(
     assert window.worker_rows_container.isHidden() is True
     assert window._worker_widgets[1].progress_bar.value() == 0
     assert window._worker_widgets[1].detail_label.text() == "Idle"
+
+
+def test_download_worker_dedicated_sessions_and_direct_worker_telemetry(
+    qapp: QApplication,
+    sample_camera: Camera,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that DownloadWorker instantiates isolated sessions per worker, closes them on finish, and emits direct worker_id."""
+    closed_sessions: list[requests.Session] = []
+    created_sessions: list[requests.Session] = []
+
+    class MockSession(requests.Session):
+        def close(self) -> None:
+            closed_sessions.append(self)
+            super().close()
+
+    def mock_create_session(
+        host: str,
+        port: int,
+        username: str,
+        password: str | object,
+        auth_type: str = "digest",
+    ) -> requests.Session:
+        sess = MockSession()
+        sess.headers["X-Test-Worker"] = f"{username}@{host}:{port}"
+        created_sessions.append(sess)
+        return sess
+
+    items: list[RecordingItem] = []
+    for i in range(1, 4):
+        rec = Recording(
+            start=ISODatetimeStr(f"2026-10-02T10:{i:02d}:00Z"),
+            end=ISODatetimeStr(f"2026-10-02T10:{i+1:02d}:00Z"),
+            name=f"stream_{i:02d}.mp4",
+            size_bytes=ByteCount(1024 * 1024),
+            playback_uri=f"rtsp://192.168.1.100/{i}",
+        )
+        items.append(RecordingItem(recording=rec, camera=sample_camera, stream="HD", track_id=TrackId(101)))
+
+    def mock_download(*args: object, **kwargs: object) -> tuple[bool, float, ByteCount, bool, str | None]:
+        progress_cb = kwargs.get("progress_callback")
+        current_idx = int(kwargs["current_index"]) if "current_index" in kwargs and isinstance(kwargs["current_index"], int) else 1
+        rec_arg: Recording = kwargs["recording"]  # type: ignore[assignment]
+        if callable(progress_cb):
+            prog = DownloadProgress(
+                current_index=current_idx,
+                total_files=3,
+                filename=rec_arg.name,
+                bytes_downloaded=ByteCount(500),
+                file_size_bytes=ByteCount(1000),
+                speed_mbps=MegabitsPerSecond(16.0),
+                elapsed_seconds=0.1,
+                is_completed=False,
+                is_skipped=False,
+            )
+            progress_cb(prog)
+            prog_comp = DownloadProgress(
+                current_index=current_idx,
+                total_files=3,
+                filename=rec_arg.name,
+                bytes_downloaded=ByteCount(1000),
+                file_size_bytes=ByteCount(1000),
+                speed_mbps=MegabitsPerSecond(16.0),
+                elapsed_seconds=0.2,
+                is_completed=True,
+                is_skipped=False,
+            )
+            progress_cb(prog_comp)
+        return True, 0.2, ByteCount(1000), False, None
+
+    monkeypatch.setattr("hikvision_downloader.ui.workers.create_authenticated_session", mock_create_session)
+    monkeypatch.setattr("hikvision_downloader.ui.workers.download_recording", mock_download)
+
+    worker = DownloadWorker(
+        host="192.168.1.100",
+        port=80,
+        username="operator",
+        password="secret_pass_123",
+        auth_type="digest",
+        selected_items=items,
+        output_root=tmp_path,
+        max_workers=3,
+        save_csv=False,
+    )
+
+    emitted_progress: list[tuple[int, DownloadProgress]] = []
+    worker.signal_progress.connect(lambda wid, p: emitted_progress.append((wid, p)), Qt.ConnectionType.DirectConnection)
+
+    worker.run()
+
+    # 1. Exactly 3 distinct sessions created
+    assert len(created_sessions) == 3
+    assert len(set(created_sessions)) == 3
+
+    # 2. All 3 sessions closed on completion
+    assert len(closed_sessions) == 3
+    assert set(closed_sessions) == set(created_sessions)
+
+    # 3. Direct worker ID emitted in progress signals
+    assert len(emitted_progress) >= 3
+    emitted_worker_ids = {wid for wid, _ in emitted_progress}
+    assert emitted_worker_ids.issubset({1, 2, 3})
+    for wid, prog in emitted_progress:
+        assert isinstance(wid, int)
+        assert 1 <= wid <= 3
+        assert isinstance(prog, DownloadProgress)
+
 
 
 
