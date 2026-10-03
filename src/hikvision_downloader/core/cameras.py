@@ -367,6 +367,7 @@ def discover_cameras_isapi(
             ch_num = CameraNumber(ch_id)
             name = ch_info.get("name") or track_names.get(ch_id) or f"Camera_{ch_id}"
             ip_addr = ch_info.get("ip_address") or str(status_data.get(ch_id, {}).get("ip_address", ""))
+            model_val = ch_info.get("model") or ""
             if not ip_addr:
                 ip_addr = host
 
@@ -395,6 +396,7 @@ def discover_cameras_isapi(
                 number=ch_num,
                 name=name,
                 ip_address=ip_addr,
+                model=model_val,
                 main_track=main_track_val,
                 sub_track=sub_track_val,
                 tracks=tracks_mapping,
@@ -547,6 +549,7 @@ def load_cameras(config_file: str | Path) -> dict[CameraNumber, Camera]:
             number=camera_number,
             name=str(item["name"]).strip(),
             ip_address=str(item["ip_address"]).strip(),
+            model=str(item.get("model", "")).strip(),
             main_track=main_track,
             sub_track=sub_track,
             tracks=tracks_dict,

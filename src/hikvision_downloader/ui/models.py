@@ -130,6 +130,8 @@ class RecordingsTableModel(QAbstractTableModel):
     ) -> object:
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole and 0 <= section < len(self.HEADERS):
             return self.HEADERS[section]
+        if orientation == Qt.Orientation.Vertical and role == Qt.ItemDataRole.DisplayRole and 0 <= section < len(self._items):
+            return str(section + 1)
         return None
 
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:

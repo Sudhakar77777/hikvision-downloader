@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QFileDialog,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -94,12 +93,19 @@ class CameraRowWidget(QWidget):
         self.camera = camera
         self.setObjectName("cameraRow")
         self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(8, 4, 8, 4)
-        self._layout.setSpacing(8)
+        self._layout.setContentsMargins(6, 1, 6, 1)
+        self._layout.setSpacing(6)
 
-        self.checkbox = QCheckBox(camera.display_name, self)
+        # Checkbox with Channel Number & Name
+        self.checkbox = QCheckBox(f"CH{int(camera.number):02d}  {camera.name}", self)
         self.checkbox.setChecked(True)
         self._layout.addWidget(self.checkbox, stretch=1)
+
+        # Right Column: Model Badge if available
+        if camera.model:
+            model_label = QLabel(camera.model, self)
+            model_label.setStyleSheet("font-size: 10px; color: #64748B; font-weight: 500; padding: 0 4px;")
+            self._layout.addWidget(model_label)
 
     @property
     def is_selected(self) -> bool:
@@ -117,13 +123,13 @@ class MainWindow(QMainWindow):
         screen_obj = QApplication.primaryScreen()
         if screen_obj is not None:
             screen = screen_obj.availableGeometry()
-            width = max(1240, min(1440, int(screen.width() * 0.85)))
-            height = max(820, min(940, int(screen.height() * 0.85)))
+            width = max(1340, min(1600, int(screen.width() * 0.88)))
+            height = max(920, min(1050, int(screen.height() * 0.88)))
             self.resize(width, height)
             self.move(screen.center() - self.rect().center())
         else:
-            self.resize(1320, 880)
-        self.setMinimumSize(1180, 760)
+            self.resize(1340, 920)
+        self.setMinimumSize(1200, 820)
 
         # Theme state
         self._is_dark_theme: bool = True
@@ -221,6 +227,7 @@ class MainWindow(QMainWindow):
         self.host_input.setPlaceholderText("192.168.1.100")
         self.host_input.setMaximumWidth(120)
         self.host_input.setText(NVR_HOST or "")
+        self.host_input.editingFinished.connect(self._on_connection_field_changed)
         form_layout.addWidget(self.host_input)
 
         # Port
@@ -231,6 +238,7 @@ class MainWindow(QMainWindow):
         self.port_input.setFixedWidth(50)
         self.port_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.port_input.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.port_input.editingFinished.connect(self._on_connection_field_changed)
         form_layout.addWidget(self.port_input)
 
         # Username
@@ -239,6 +247,7 @@ class MainWindow(QMainWindow):
         self.user_input.setPlaceholderText("admin")
         self.user_input.setMinimumWidth(115)
         self.user_input.setText(NVR_USERNAME or "admin")
+        self.user_input.editingFinished.connect(self._on_connection_field_changed)
         form_layout.addWidget(self.user_input)
 
         # Password
@@ -269,18 +278,19 @@ class MainWindow(QMainWindow):
         # Status Badge Pill
         self.status_badge = QLabel("● Disconnected", self)
         self.status_badge.setObjectName("statusBadge")
+        self.status_badge.setFixedHeight(28)
         self.status_badge.setStyleSheet(
-            "background-color: #334155; color: #94A3B8; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
+            "background-color: #334155; color: #94A3B8; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold;"
         )
-        h_layout.addWidget(self.status_badge)
+        h_layout.addWidget(self.status_badge, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # Theme Switcher Button
         self.theme_btn = QPushButton("☀️", self)
         self.theme_btn.setObjectName("secondaryBtn")
-        self.theme_btn.setFixedSize(32, 28)
+        self.theme_btn.setFixedSize(36, 28)
         self.theme_btn.setToolTip("Toggle Light/Dark Theme")
         self.theme_btn.clicked.connect(self._toggle_theme)
-        h_layout.addWidget(self.theme_btn)
+        h_layout.addWidget(self.theme_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._root_layout.addWidget(header)
 
@@ -394,10 +404,17 @@ class MainWindow(QMainWindow):
         self.main_splitter.setSizes([420, max(self.width() - 420, 750)])
         self._root_layout.addWidget(self.main_splitter, stretch=1)
 
-    def _build_camera_group(self) -> QGroupBox:
-        group = QGroupBox("Camera Channels & Stream", self)
-        layout = QVBoxLayout(group)
+    def _build_camera_group(self) -> QFrame:
+        frame = QFrame(self)
+        frame.setObjectName("cardFrame")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
+
+        # Embedded Section Header
+        header_label = QLabel("CAMERA CHANNELS & STREAM", self)
+        header_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #38BDF8; background: transparent; border: none; padding-bottom: 6px;")
+        layout.addWidget(header_label)
 
         # Quick Actions Bar
         actions_layout = QHBoxLayout()
@@ -424,8 +441,8 @@ class MainWindow(QMainWindow):
         # Camera Checklist Container (Scrollable)
         self.camera_list_container = QWidget(self)
         self.camera_list_layout = QVBoxLayout(self.camera_list_container)
-        self.camera_list_layout.setContentsMargins(0, 4, 0, 4)
-        self.camera_list_layout.setSpacing(4)
+        self.camera_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.camera_list_layout.setSpacing(2)
 
         self.empty_cam_label = QLabel("No cameras discovered. Click 'Connect' to discover channels.", self)
         self.empty_cam_label.setStyleSheet("color: #64748B; font-style: italic; padding: 12px;")
@@ -435,8 +452,11 @@ class MainWindow(QMainWindow):
         self.camera_scroll = QScrollArea(self)
         self.camera_scroll.setWidgetResizable(True)
         self.camera_scroll.setWidget(self.camera_list_container)
-        self.camera_scroll.setMinimumHeight(400)
+        self.camera_scroll.setMinimumHeight(455)
         layout.addWidget(self.camera_scroll)
+
+        # Explicit spacing above stream quality
+        layout.addSpacing(10)
 
         # Stream Quality Dropdown
         stream_row = QHBoxLayout()
@@ -449,12 +469,19 @@ class MainWindow(QMainWindow):
         stream_row.addWidget(self.stream_combo, stretch=1)
         layout.addLayout(stream_row)
 
-        return group
+        return frame
 
-    def _build_time_group(self) -> QGroupBox:
-        group = QGroupBox("Recording Time Window", self)
-        layout = QVBoxLayout(group)
+    def _build_time_group(self) -> QFrame:
+        frame = QFrame(self)
+        frame.setObjectName("cardFrame")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(10)
+
+        # Embedded Section Header
+        header_label = QLabel("RECORDING TIME WINDOW", self)
+        header_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #38BDF8; background: transparent; border: none; padding-bottom: 6px;")
+        layout.addWidget(header_label)
 
         # Row 1: Target Date Picker
         date_layout = QHBoxLayout()
@@ -540,7 +567,7 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(time_layout)
 
-        return group
+        return frame
 
     def _build_download_settings_panel(self) -> QFrame:
         frame = QFrame(self)
@@ -609,28 +636,26 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
-        # Section Header
-        section_title = QLabel("RECORDINGS / VIDEO FILES", self)
-        section_title.setStyleSheet("font-size: 12px; font-weight: 700; color: #38BDF8; letter-spacing: 0.5px;")
-        layout.addWidget(section_title)
-
-        # Top Bar: Counters and Selection Actions
+        # Top Bar: Section Title + Selection Actions
         top_bar = QHBoxLayout()
         top_bar.setSpacing(10)
+        top_bar.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        self.summary_label = QLabel("0 segments discovered (0 B) | 0 selected (0 B)", self)
-        self.summary_label.setStyleSheet("font-weight: 600;")
-        top_bar.addWidget(self.summary_label)
+        section_title = QLabel("RECORDINGS / VIDEO FILES", self)
+        section_title.setStyleSheet("font-size: 11px; font-weight: bold; color: #38BDF8; letter-spacing: 0.5px;")
+        top_bar.addWidget(section_title)
 
         top_bar.addStretch(1)
 
         btn_all = QPushButton("Select All", self)
         btn_all.setObjectName("secondaryBtn")
+        btn_all.setFixedHeight(24)
         btn_all.clicked.connect(lambda: self._table_model.select_all(True))
         top_bar.addWidget(btn_all)
 
         btn_none = QPushButton("Clear", self)
         btn_none.setObjectName("secondaryBtn")
+        btn_none.setFixedHeight(24)
         btn_none.clicked.connect(lambda: self._table_model.select_all(False))
         top_bar.addWidget(btn_none)
 
@@ -643,6 +668,8 @@ class MainWindow(QMainWindow):
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_view.setAlternatingRowColors(True)
         self.table_view.setShowGrid(False)
+        self.table_view.verticalHeader().setVisible(True)
+        self.table_view.verticalHeader().setDefaultSectionSize(26)
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table_view.horizontalHeader().setStretchLastSection(True)
 
@@ -657,6 +684,19 @@ class MainWindow(QMainWindow):
         self.table_view.setColumnWidth(RecordingsTableModel.COL_STATUS, 100)
 
         layout.addWidget(self.table_view)
+
+        # Bottom Bar: Summary Segments Counter below Table View
+        bottom_bar = QHBoxLayout()
+        bottom_bar.setSpacing(10)
+        bottom_bar.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        self.summary_label = QLabel("0 segments discovered (0 B) | 0 selected (0 B)", self)
+        self.summary_label.setStyleSheet("font-size: 11px; font-weight: 600; color: #94A3B8;")
+        bottom_bar.addWidget(self.summary_label)
+
+        bottom_bar.addStretch(1)
+        layout.addLayout(bottom_bar)
+
         return panel
 
     def _build_console_log_panel(self) -> QWidget:
@@ -666,43 +706,44 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
 
-        # Header bar with integrated telemetry progress
-        header_bar = QHBoxLayout()
-        header_bar.setSpacing(10)
-        header_bar.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        # Tier 1: Header Line ([ LIVE CONSOLE ] ------------------- [ Clear ])
+        tier1_header = QHBoxLayout()
+        tier1_header.setSpacing(10)
+        tier1_header.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        console_title = QLabel("Live Console", self)
-        console_title.setStyleSheet("font-weight: bold; color: #38BDF8; font-size: 12px;")
-        header_bar.addWidget(console_title)
+        console_title = QLabel("LIVE CONSOLE", self)
+        console_title.setStyleSheet("font-size: 11px; font-weight: bold; color: #38BDF8; background: transparent; border: none;")
+        tier1_header.addWidget(console_title)
 
-        # Integrated progress bar & telemetry indicators
-        self.overall_progress_bar = QProgressBar(self)
-        self.overall_progress_bar.setRange(0, 100)
-        self.overall_progress_bar.setValue(0)
-        self.overall_progress_bar.setFixedHeight(14)
-        self.overall_progress_bar.setMinimumWidth(100)
-        header_bar.addWidget(self.overall_progress_bar, stretch=1)
-
-        self.progress_status_label = QLabel("Idle", self)
-        self.progress_status_label.setStyleSheet("color: #94A3B8; font-size: 11px;")
-        header_bar.addWidget(self.progress_status_label)
-
-        self.progress_speed_label = QLabel("0.0 Mbps", self)
-        self.progress_speed_label.setStyleSheet("color: #F37021; font-size: 11px; font-weight: bold;")
-        header_bar.addWidget(self.progress_speed_label)
-
-        self.progress_eta_label = QLabel("Elapsed: 00:00", self)
-        self.progress_eta_label.setStyleSheet("color: #94A3B8; font-size: 11px;")
-        header_bar.addWidget(self.progress_eta_label)
+        tier1_header.addStretch(1)
 
         clear_btn = QPushButton("Clear", self)
         clear_btn.setObjectName("secondaryBtn")
         clear_btn.setFixedHeight(24)
         clear_btn.clicked.connect(self._on_clear_console)
-        header_bar.addWidget(clear_btn)
+        tier1_header.addWidget(clear_btn)
 
-        layout.addLayout(header_bar)
+        layout.addLayout(tier1_header)
 
+        # Tier 2: Dedicated Status & Progress Bar Line
+        tier2_progress = QHBoxLayout()
+        tier2_progress.setSpacing(10)
+        tier2_progress.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        self.overall_progress_bar = QProgressBar(self)
+        self.overall_progress_bar.setRange(0, 100)
+        self.overall_progress_bar.setValue(0)
+        self.overall_progress_bar.setFixedHeight(10)
+        self.overall_progress_bar.setMinimumWidth(100)
+        tier2_progress.addWidget(self.overall_progress_bar, stretch=1)
+
+        self.progress_readout = QLabel("[ 0% ]  Idle  |  0.0 Mbps  |  Elapsed: 00:00  |  ETA: --:--", self)
+        self.progress_readout.setStyleSheet("font-size: 11px; color: #94A3B8; font-weight: 500;")
+        tier2_progress.addWidget(self.progress_readout)
+
+        layout.addLayout(tier2_progress)
+
+        # Tier 3: Terminal Console
         self.console_log = QPlainTextEdit(self)
         self.console_log.setObjectName("consoleLog")
         self.console_log.setReadOnly(True)
@@ -742,9 +783,26 @@ class MainWindow(QMainWindow):
             if saved_pw:
                 self.password_input.setText(saved_pw)
                 self.remember_cb.setChecked(True)
+                self.password_input.setToolTip("🔑 Loaded from OS Keychain")
                 self.log_message("INFO", f"Loaded stored credentials from OS Keychain for {host}:{port}.")
             elif NVR_PASSWORD:
                 self.password_input.setText(NVR_PASSWORD)
+
+    def _on_connection_field_changed(self) -> None:
+        """Reactively lookup credentials from OS Keychain on host/user field edit."""
+        host = self.host_input.text().strip()
+        user = self.user_input.text().strip()
+        port = self.port_input.value()
+
+        if host and user:
+            stored_password = get_nvr_password(host, user, port)
+            if stored_password:
+                self.password_input.setText(stored_password)
+                self.remember_cb.setChecked(True)
+                self.password_input.setToolTip("🔑 Loaded from OS Keychain")
+                self.log_message("INFO", f"Retrieved stored credentials from OS Keychain for {user}@{host}:{port}.")
+            else:
+                self.password_input.setToolTip("")
 
     def _save_credentials_if_checked(self) -> None:
         host = self.host_input.text().strip()
@@ -811,7 +869,7 @@ class MainWindow(QMainWindow):
         self.connect_btn.setEnabled(False)
         self.status_badge.setText("● Connecting...")
         self.status_badge.setStyleSheet(
-            "background-color: #78350F; color: #F59E0B; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
+            "background-color: #78350F; color: #F59E0B; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
         )
 
         self._auth_worker = AuthWorker(
@@ -837,7 +895,7 @@ class MainWindow(QMainWindow):
             self.connect_btn.style().polish(self.connect_btn)
             self.status_badge.setText("● Connected")
             self.status_badge.setStyleSheet(
-                "background-color: #064E3B; color: #10B981; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
+                "background-color: #064E3B; color: #10B981; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
             )
 
             # Clear focus from input controls and focus search button
@@ -856,7 +914,7 @@ class MainWindow(QMainWindow):
             self.connect_btn.style().polish(self.connect_btn)
             self.status_badge.setText("● Auth Failed")
             self.status_badge.setStyleSheet(
-                "background-color: #7F1D1D; color: #EF4444; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
+                "background-color: #7F1D1D; color: #EF4444; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
             )
             QMessageBox.critical(self, "Authentication Failed", f"Could not authenticate with NVR:\n{message}")
 
@@ -877,16 +935,30 @@ class MainWindow(QMainWindow):
         self._camera_rows.clear()
         self._discovered_dates.clear()
         self._device_info.clear()
-        self._rebuild_camera_checklist()
+
+        # Completely destroy all camera rows in layout and restore empty placeholder
+        while (item := self.camera_list_layout.takeAt(0)) is not None:
+            if w := item.widget():
+                w.deleteLater()
+
+        self.empty_cam_label = QLabel("No cameras discovered. Click 'Connect' to discover channels.", self)
+        self.empty_cam_label.setStyleSheet("color: #64748B; font-style: italic; padding: 12px;")
+        self.empty_cam_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.camera_list_layout.addWidget(self.empty_cam_label)
+        self.empty_cam_label.setVisible(True)
+
         self._update_stream_options()
         self._table_model.clear()
+        self.summary_label.setText("0 segments discovered (0 B) | 0 selected (0 B)")
+        self.overall_progress_bar.setValue(0)
+        self.progress_readout.setText("[ 0% ]  Idle  |  0.0 Mbps  |  Elapsed: 00:00  |  ETA: --:--")
         self.connect_btn.setText("Connect")
         self.connect_btn.setProperty("connected", "false")
         self.connect_btn.style().unpolish(self.connect_btn)
         self.connect_btn.style().polish(self.connect_btn)
         self.status_badge.setText("● Disconnected")
         self.status_badge.setStyleSheet(
-            "background-color: #334155; color: #94A3B8; border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
+            "background-color: #334155; color: #94A3B8; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: bold; min-height: 24px; max-height: 28px;"
         )
         self.footer_device_label.setText("Disconnected · Ready")
         self.log_message("INFO", "Disconnected from NVR session.")
@@ -1186,7 +1258,7 @@ class MainWindow(QMainWindow):
         self.abort_btn.setEnabled(True)
         self.search_btn.setEnabled(False)
         self.overall_progress_bar.setValue(0)
-        self.progress_status_label.setText("Preparing batch download...")
+        self.progress_readout.setText("[   0% ]  Preparing batch download...  |  0.0 Mbps  |  Elapsed: 00:00  |  ETA: --:--")
 
         host = self.host_input.text().strip()
         port = self.port_input.value()
@@ -1217,11 +1289,20 @@ class MainWindow(QMainWindow):
         percent = max(0, min(percent, 100))
 
         self.overall_progress_bar.setValue(percent)
-        self.progress_status_label.setText(f"[{curr_idx}/{total_files}] {prog.filename}")
-        self.progress_speed_label.setText(f"{float(prog.speed_mbps):.1f} Mbps")
-
         elapsed_str = time.strftime("%M:%S", time.gmtime(prog.elapsed_seconds))
-        self.progress_eta_label.setText(f"Elapsed: {elapsed_str}")
+        speed = float(prog.speed_mbps)
+
+        if speed > 0 and prog.bytes_downloaded > 0 and prog.elapsed_seconds > 0:
+            bytes_per_sec = prog.bytes_downloaded / prog.elapsed_seconds
+            rem_bytes = max(0, prog.file_size_bytes - prog.bytes_downloaded)
+            rem_secs = int(rem_bytes / max(bytes_per_sec, 1))
+            eta_str = time.strftime("%M:%S", time.gmtime(rem_secs))
+        else:
+            eta_str = "--:--"
+
+        self.progress_readout.setText(
+            f"[ {percent:3d}% ]  [{curr_idx}/{total_files}] {prog.filename}  |  {speed:.1f} Mbps  |  Elapsed: {elapsed_str}  |  ETA: {eta_str}"
+        )
 
         self._table_model.update_item_status(
             filename=prog.filename,
@@ -1239,8 +1320,11 @@ class MainWindow(QMainWindow):
         self.overall_progress_bar.setValue(100 if result.success else self.overall_progress_bar.value())
 
         status_text = "Complete" if result.success else ("Cancelled" if "cancelled" in str(result.error_message).lower() else "Failed")
-        self.progress_status_label.setText(f"{status_text} ({result.downloaded_files} downloaded, {result.skipped_files} skipped)")
-        self.progress_speed_label.setText("0.0 Mbps")
+        elapsed_str = time.strftime("%M:%S", time.gmtime(int(result.total_duration_seconds)))
+        percent = 100 if result.success else self.overall_progress_bar.value()
+        self.progress_readout.setText(
+            f"[ {percent:3d}% ]  {status_text} ({result.downloaded_files} downloaded, {result.skipped_files} skipped)  |  0.0 Mbps  |  Elapsed: {elapsed_str}  |  ETA: 00:00"
+        )
 
         if result.success:
             QMessageBox.information(

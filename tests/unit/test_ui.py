@@ -11,7 +11,7 @@ import keyring.errors
 import pytest
 import requests
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 # Guarantee headless offscreen Qt execution for offline test environments
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -224,6 +224,8 @@ def test_table_model_operations(qapp: QApplication, sample_camera: Camera) -> No
     assert model.get_total_count() == 2
     assert model.get_selected_count() == 2
     assert model.get_total_selected_size() == 300 * 1024 * 1024
+    assert model.headerData(0, Qt.Orientation.Vertical) == "1"
+    assert model.headerData(1, Qt.Orientation.Vertical) == "2"
 
     # Data check
     idx_cam = model.index(0, RecordingsTableModel.COL_CAMERA)
@@ -426,10 +428,24 @@ def test_camera_row_widget(qapp: QApplication, sample_camera: Camera) -> None:
     widget = CameraRowWidget(sample_camera)
     assert widget.objectName() == "cameraRow"
     assert widget.is_selected is True
-    assert widget.checkbox.text() == "D1 MainGate"
+    assert widget.checkbox.text() == "CH01  MainGate"
 
     widget.checkbox.setChecked(False)
     assert widget.is_selected is False
+
+    # Test camera with model number
+    cam_with_model = Camera(
+        number=CameraNumber(3),
+        name="Lobby",
+        ip_address="192.168.1.103",
+        model="DS-2CD2143G0-I",
+        main_track=TrackId(301),
+        sub_track=TrackId(302),
+        tracks={"main": TrackId(301), "sub": TrackId(302)},
+    )
+    widget_model = CameraRowWidget(cam_with_model)
+    assert widget_model.checkbox.text() == "CH03  Lobby"
+    assert widget_model.findChild(QLabel) is not None
 
 
 def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) -> None:
@@ -442,7 +458,12 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     assert window.start_mm_combo.width() == 56
     assert window.left_panel.minimumWidth() >= 410
     assert window.main_splitter.isCollapsible(0) is False
-    assert window.camera_scroll.minimumHeight() == 240
+    assert window.camera_scroll.minimumHeight() == 455
+    assert window.minimumWidth() == 1200
+    assert window.minimumHeight() == 820
+    assert window.status_badge.maximumHeight() == 28
+    assert window.theme_btn.width() == 36
+    assert window.theme_btn.height() == 28
     assert window.worker_slider.value() >= 1
     assert window.stream_combo.count() == 1
     assert window.footer_device_label.text() == "Disconnected · Ready"
@@ -451,7 +472,7 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     # Populate camera checklist
     window._on_discovery_cameras({CameraNumber(1): sample_camera})
     assert len(window._camera_rows) == 1
-    assert window._camera_rows[0].camera.display_name == "D1 MainGate"
+    assert window._camera_rows[0].checkbox.text() == "CH01  MainGate"
     assert window.stream_combo.count() == 2  # Has HD and SD
 
     # Deselect all cameras check
@@ -498,3 +519,73 @@ def test_main_window_instantiation(qapp: QApplication, sample_camera: Camera) ->
     # Console log high contrast check
     window.log_message("INFO", "Test high contrast logging")
     assert "Test high contrast logging" in window.console_log.toPlainText()
+
+
+def test_keychain_reactive_autofill(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test reactive autofill when editing connection input fields."""
+    monkeypatch.setattr(
+        "hikvision_downloader.ui.main_window.get_nvr_password",
+        lambda host, user, port: "keychain_secret" if host == "192.168.1.200" and user == "admin" else None,
+    )
+
+    window = MainWindow()
+    window.host_input.setText("192.168.1.200")
+    window.user_input.setText("admin")
+    window.port_input.setValue(80)
+    window._on_connection_field_changed()
+
+    assert window.password_input.text() == "keychain_secret"
+    assert window.remember_cb.isChecked() is True
+    assert "Loaded from OS Keychain" in window.password_input.toolTip()
+
+
+def test_disconnect_session_complete_purge(qapp: QApplication, sample_camera: Camera) -> None:
+    """Test complete purge of camera items, table rows, and counters on session disconnect."""
+    window = MainWindow()
+    cam2 = Camera(
+        number=CameraNumber(2),
+        name="Backyard",
+        ip_address="192.168.1.101",
+        main_track=TrackId(201),
+        sub_track=TrackId(202),
+        tracks={"main": TrackId(201), "sub": TrackId(202)},
+    )
+    window._on_discovery_cameras({CameraNumber(1): sample_camera, CameraNumber(2): cam2})
+    assert len(window._camera_rows) == 2
+    assert window.empty_cam_label.isHidden() is True
+
+    # Disconnect session
+    window._disconnect_session()
+    assert len(window._camera_rows) == 0
+    assert window.empty_cam_label.isHidden() is False
+    assert window.empty_cam_label.text() == "No cameras discovered. Click 'Connect' to discover channels."
+    assert window.summary_label.text() == "0 segments discovered (0 B) | 0 selected (0 B)"
+    assert window.overall_progress_bar.value() == 0
+    assert "Idle" in window.progress_readout.text()
+    assert window.footer_device_label.text() == "Disconnected · Ready"
+
+
+def test_console_3tier_hierarchy_and_progress(qapp: QApplication) -> None:
+    """Test 3-tier console structure and telemetry updates."""
+    from hikvision_downloader.core.models import DownloadProgress, MegabitsPerSecond
+
+    window = MainWindow()
+    assert window.overall_progress_bar.maximumHeight() == 10
+    assert "Idle" in window.progress_readout.text()
+
+    # Emulate download progress
+    prog = DownloadProgress(
+        filename="ch01_20261002_100000.mp4",
+        bytes_downloaded=ByteCount(52428800),
+        file_size_bytes=ByteCount(104857600),
+        speed_mbps=MegabitsPerSecond(24.5),
+        elapsed_seconds=10.0,
+        current_index=1,
+        total_files=2,
+        is_completed=False,
+        is_skipped=False,
+    )
+    window._on_download_progress(prog)
+    assert window.overall_progress_bar.value() == 25  # (0 + 0.5) / 2 = 25%
+    assert "ch01_20261002_100000.mp4" in window.progress_readout.text()
+    assert "24.5 Mbps" in window.progress_readout.text()

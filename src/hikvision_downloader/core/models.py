@@ -50,6 +50,7 @@ class Camera(BaseModel):
     number: CameraNumber = Field(..., description="Camera channel number (>=1)")
     name: str = Field(..., min_length=1, description="Camera display name")
     ip_address: str = Field(..., min_length=1, description="Camera IP address or hostname")
+    model: str = Field(default="", description="Camera hardware model")
     main_track: TrackId = Field(..., description="Main stream ISAPI track ID")
     sub_track: TrackId = Field(default=TrackId(0), description="Sub stream ISAPI track ID")
     tracks: dict[str, TrackId] = Field(
