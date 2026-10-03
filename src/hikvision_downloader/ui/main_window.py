@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -102,6 +103,17 @@ def resolve_default_output_dir() -> Path:
     if env_dir and env_dir.strip():
         return Path(env_dir.strip()).expanduser().resolve()
     return (Path.home() / "Downloads" / "HikvisionArchive").resolve()
+
+
+@dataclass
+class WorkerActivity:
+    """State of an active concurrent download worker."""
+
+    worker_id: int
+    filename: str = ""
+    percent: int = 0
+    speed_mb_s: float = 0.0
+    active: bool = False
 
 
 class ProfileComboBox(QComboBox):
@@ -206,6 +218,11 @@ class MainWindow(QMainWindow):
         self._dates_worker: DatesWorker | None = None
         self._search_worker: SearchWorker | None = None
         self._download_worker: DownloadWorker | None = None
+
+        # Concurrent Download Worker Tracking
+        self._worker_activities: dict[int, WorkerActivity] = {}
+        self._file_to_worker: dict[str, int] = {}
+        self._total_batch_files: int = 0
 
         # Table Models
         self._cameras_table_model = CamerasTableModel(self)
@@ -387,7 +404,7 @@ class MainWindow(QMainWindow):
         footer_icon.setFixedSize(18, 18)
         brand_layout.addWidget(footer_icon)
 
-        footer_brand = QLabel("Arivedha Surveillance Management Suite", self)
+        footer_brand = QLabel("Product by Arivedha", self)
         footer_brand.setStyleSheet("font-size: 11px; font-weight: 600; color: #94A3B8; border: none; background: transparent;")
         brand_layout.addWidget(footer_brand)
         f_layout.addLayout(brand_layout)
@@ -491,7 +508,7 @@ class MainWindow(QMainWindow):
         btn_select_all.clicked.connect(lambda: self._cameras_table_model.select_all(True))
         actions_layout.addWidget(btn_select_all)
 
-        btn_deselect_all = QPushButton("Deselect", self)
+        btn_deselect_all = QPushButton("Clear", self)
         btn_deselect_all.setObjectName("secondaryBtn")
         btn_deselect_all.clicked.connect(lambda: self._cameras_table_model.select_all(False))
         actions_layout.addWidget(btn_deselect_all)
@@ -531,8 +548,8 @@ class MainWindow(QMainWindow):
         self.cameras_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.cameras_table.horizontalHeader().setStretchLastSection(True)
 
-        self.cameras_table.setColumnWidth(CamerasTableModel.COL_CHECK, 34)
-        self.cameras_table.setColumnWidth(CamerasTableModel.COL_NUM, 40)
+        self.cameras_table.setColumnWidth(CamerasTableModel.COL_CHECK, 28)
+        self.cameras_table.setColumnWidth(CamerasTableModel.COL_NUM, 30)
         self.cameras_table.setColumnWidth(CamerasTableModel.COL_NAME, 170)
         self.cameras_table.setColumnWidth(CamerasTableModel.COL_MODEL, 130)
         self.cameras_table.horizontalHeader().setSectionResizeMode(CamerasTableModel.COL_CHECK, QHeaderView.ResizeMode.Fixed)
@@ -761,8 +778,8 @@ class MainWindow(QMainWindow):
         self.table_view.horizontalHeader().setStretchLastSection(True)
 
         # Set specific column widths ensuring symmetry with left table
-        self.table_view.setColumnWidth(RecordingsTableModel.COL_CHECK, 34)
-        self.table_view.setColumnWidth(RecordingsTableModel.COL_NUM, 40)
+        self.table_view.setColumnWidth(RecordingsTableModel.COL_CHECK, 28)
+        self.table_view.setColumnWidth(RecordingsTableModel.COL_NUM, 30)
         self.table_view.setColumnWidth(RecordingsTableModel.COL_CAMERA, 140)
         self.table_view.setColumnWidth(RecordingsTableModel.COL_STREAM, 65)
         self.table_view.setColumnWidth(RecordingsTableModel.COL_FILENAME, 220)
@@ -1621,12 +1638,18 @@ class MainWindow(QMainWindow):
         self.abort_btn.setEnabled(True)
         self.search_btn.setEnabled(False)
         self.overall_progress_bar.setValue(0)
-        self.progress_readout.setText("[   0% ]  Preparing batch download...  |  0.0 Mbps  |  Elapsed: 00:00  |  ETA: --:--")
+        self.progress_readout.setText("[   0% ]  Preparing batch download...  |  0.0 MB/s  |  Elapsed: 00:00  |  ETA: --:--")
 
         host = self.host_input.text()
         port = self.port_input.value()
         workers = self.worker_slider.value()
         save_csv = self.csv_manifest_cb.isChecked()
+
+        self._worker_activities.clear()
+        self._file_to_worker.clear()
+        self._total_batch_files = len(selected_items)
+        for wid in range(1, workers + 1):
+            self._worker_activities[wid] = WorkerActivity(worker_id=wid)
 
         self._download_worker = DownloadWorker(
             session=self._session,
@@ -1639,42 +1662,115 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         self._download_worker.signal_log.connect(self.log_message)
+        self._download_worker.signal_file_started.connect(self._on_file_started)
         self._download_worker.signal_progress.connect(self._on_download_progress)
         self._download_worker.signal_file_completed.connect(self._on_file_completed)
         self._download_worker.signal_finished.connect(self._on_download_finished)
         self._download_worker.signal_error.connect(lambda err: QMessageBox.critical(self, "Download Error", err))
         self._download_worker.start()
 
+    def _on_file_started(self, filename: str, worker_id: int) -> None:
+        """Handle worker starting download for a specific recording file."""
+        self._file_to_worker[filename] = worker_id
+        activity = self._worker_activities.get(worker_id)
+        if activity is not None:
+            activity.filename = filename
+            activity.percent = 0
+            activity.speed_mb_s = 0.0
+            activity.active = True
+        self._table_model.update_item_status(filename=filename, status="Downloading")
+        self._update_multi_worker_progress()
+
     def _on_download_progress(self, prog: DownloadProgress) -> None:
-        total_files = max(prog.total_files, 1)
-        curr_idx = prog.current_index
-        percent = int(((curr_idx - 1) + (prog.bytes_downloaded / max(prog.file_size_bytes, 1))) / total_files * 100)
-        percent = max(0, min(percent, 100))
+        """Update live percentage in row status and multi-worker progress feedback."""
+        file_percent = int((prog.bytes_downloaded / max(prog.file_size_bytes, 1)) * 100)
+        file_percent = max(0, min(file_percent, 100))
 
-        self.overall_progress_bar.setValue(percent)
-        elapsed_str = time.strftime("%M:%S", time.gmtime(prog.elapsed_seconds))
-        speed = float(prog.speed_mbps)
-
-        if speed > 0 and prog.bytes_downloaded > 0 and prog.elapsed_seconds > 0:
-            bytes_per_sec = prog.bytes_downloaded / prog.elapsed_seconds
-            rem_bytes = max(0, prog.file_size_bytes - prog.bytes_downloaded)
-            rem_secs = int(rem_bytes / max(bytes_per_sec, 1))
-            eta_str = time.strftime("%M:%S", time.gmtime(rem_secs))
-        else:
-            eta_str = "--:--"
-
-        self.progress_readout.setText(
-            f"[ {percent:3d}% ]  [{curr_idx}/{total_files}] {prog.filename}  |  {speed:.1f} Mbps  |  Elapsed: {elapsed_str}  |  ETA: {eta_str}"
-        )
-
+        status_str = "Skipped" if prog.is_skipped else ("Completed" if prog.is_completed else f"Downloading ({file_percent}%)")
         self._table_model.update_item_status(
             filename=prog.filename,
-            status="Skipped" if prog.is_skipped else ("Completed" if prog.is_completed else "Downloading"),
+            status=status_str,
             bytes_downloaded=int(prog.bytes_downloaded),
         )
 
+        if not self._worker_activities:
+            wid = self._file_to_worker.get(prog.filename, 1)
+            self._worker_activities[wid] = WorkerActivity(
+                worker_id=wid,
+                filename=prog.filename,
+                percent=file_percent,
+                speed_mb_s=float(prog.speed_mbps) / 8.0,
+                active=not (prog.is_completed or prog.is_skipped),
+            )
+            self._file_to_worker[prog.filename] = wid
+            if self._total_batch_files == 0:
+                self._total_batch_files = max(prog.total_files, 1)
+        else:
+            worker_id = self._file_to_worker.get(prog.filename)
+            if worker_id is None:
+                for wid, act in self._worker_activities.items():
+                    if act.filename == prog.filename or prog.filename.endswith(act.filename) or act.filename.endswith(prog.filename):
+                        worker_id = wid
+                        break
+
+            if worker_id is not None and worker_id in self._worker_activities:
+                act = self._worker_activities[worker_id]
+                act.filename = prog.filename
+                act.percent = file_percent
+                act.speed_mb_s = float(prog.speed_mbps) / 8.0
+                act.active = not (prog.is_completed or prog.is_skipped)
+
+        self._update_multi_worker_progress()
+
+    def _update_multi_worker_progress(self) -> None:
+        """Update progress bar and console progress readout across all concurrent workers."""
+        if not self._worker_activities:
+            return
+
+        active_parts = [
+            f"Worker {wid}: [{act.filename}] {act.percent}% ({act.speed_mb_s:.1f} MB/s)"
+            for wid, act in sorted(self._worker_activities.items())
+            if act.active and act.filename
+        ]
+
+        if active_parts:
+            activity_text = " | ".join(active_parts)
+        else:
+            idle_parts = [f"Worker {wid}: Idle" for wid in sorted(self._worker_activities.keys())]
+            activity_text = " | ".join(idle_parts)
+
+        # Compute aggregate batch progress
+        total_files = max(self._total_batch_files, 1)
+        selected_items = self._table_model.get_selected_items()
+        if selected_items:
+            completed_count = 0
+            in_progress_fractions = 0.0
+            for item in selected_items:
+                if item.status in ("Completed", "Skipped"):
+                    completed_count += 1
+                elif item.status.startswith("Downloading") and "(" in item.status and "%" in item.status:
+                    try:
+                        pct_str = item.status.split("(")[1].split("%")[0]
+                        in_progress_fractions += int(pct_str) / 100.0
+                    except (ValueError, IndexError):
+                        pass
+            overall_percent = int(((completed_count + in_progress_fractions) / total_files) * 100)
+        else:
+            active_pct_sum = sum(act.percent for act in self._worker_activities.values() if act.active)
+            overall_percent = int((active_pct_sum / 100.0 / total_files) * 100)
+
+        overall_percent = max(0, min(overall_percent, 100))
+        self.overall_progress_bar.setValue(overall_percent)
+
+        self.progress_readout.setText(activity_text)
+
     def _on_file_completed(self, filename: str, status: str, is_skipped: bool) -> None:
+        """Update status on file completion and mark worker slot inactive."""
         self._table_model.update_item_status(filename=filename, status=status)
+        worker_id = self._file_to_worker.get(filename)
+        if worker_id is not None and worker_id in self._worker_activities:
+            self._worker_activities[worker_id].active = False
+        self._update_multi_worker_progress()
 
     def _on_download_finished(self, result: DownloadResult) -> None:
         self.start_download_btn.setEnabled(True)
@@ -1686,8 +1782,11 @@ class MainWindow(QMainWindow):
         elapsed_str = time.strftime("%M:%S", time.gmtime(int(result.total_duration_seconds)))
         percent = 100 if result.success else self.overall_progress_bar.value()
         self.progress_readout.setText(
-            f"[ {percent:3d}% ]  {status_text} ({result.downloaded_files} downloaded, {result.skipped_files} skipped)  |  0.0 Mbps  |  Elapsed: {elapsed_str}  |  ETA: 00:00"
+            f"[ {percent:3d}% ]  {status_text} ({result.downloaded_files} downloaded, {result.skipped_files} skipped)  |  0.0 MB/s  |  Elapsed: {elapsed_str}  |  ETA: 00:00"
         )
+
+        for act in self._worker_activities.values():
+            act.active = False
 
         if result.success:
             QMessageBox.information(

@@ -509,6 +509,50 @@ QLabel#spaceBadge {
     font-weight: 600;
     font-size: 11px;
 }
+
+/* Calendar Widget */
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background-color: #162032;
+    border-bottom: 1px solid #334155;
+}
+
+QCalendarWidget QToolButton,
+#qt_calendar_prevmonth,
+#qt_calendar_nextmonth {
+    color: #F8FAFC;
+    background-color: #334155;
+    border: 1px solid #475569;
+    border-radius: 4px;
+    margin: 2px;
+    padding: 2px 6px;
+    font-weight: 600;
+}
+
+QCalendarWidget QToolButton:hover,
+#qt_calendar_prevmonth:hover,
+#qt_calendar_nextmonth:hover {
+    background-color: #1E6B7B;
+    border-color: #38BDF8;
+}
+
+QCalendarWidget QMenu {
+    background-color: #162032;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+}
+
+QCalendarWidget QSpinBox {
+    background-color: #162032;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+}
+
+QCalendarWidget QTableView {
+    background-color: #0F172A;
+    color: #F8FAFC;
+    selection-background-color: #1E6B7B;
+    selection-color: #FFFFFF;
+}
 """
 
 LIGHT_THEME_QSS: str = """
@@ -1018,5 +1062,49 @@ QLabel#spaceBadge {
     border-radius: 6px;
     font-weight: 600;
     font-size: 11px;
+}
+
+/* Calendar Widget */
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background-color: #E2E8F0;
+    border-bottom: 1px solid #CBD5E1;
+}
+
+QCalendarWidget QToolButton,
+#qt_calendar_prevmonth,
+#qt_calendar_nextmonth {
+    color: #1E293B;
+    background-color: #E2E8F0;
+    border: 1px solid #CBD5E1;
+    border-radius: 4px;
+    margin: 2px;
+    padding: 2px 6px;
+    font-weight: 600;
+}
+
+QCalendarWidget QToolButton:hover,
+#qt_calendar_prevmonth:hover,
+#qt_calendar_nextmonth:hover {
+    background-color: #CBD5E1;
+    border-color: #0284C7;
+}
+
+QCalendarWidget QMenu {
+    background-color: #FFFFFF;
+    color: #1E293B;
+    border: 1px solid #CBD5E1;
+}
+
+QCalendarWidget QSpinBox {
+    background-color: #FFFFFF;
+    color: #1E293B;
+    border: 1px solid #CBD5E1;
+}
+
+QCalendarWidget QTableView {
+    background-color: #FFFFFF;
+    color: #1E293B;
+    selection-background-color: #1E6B7B;
+    selection-color: #FFFFFF;
 }
 """

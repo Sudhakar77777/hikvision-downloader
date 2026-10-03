@@ -2,6 +2,8 @@
 
 import os
 import shutil
+import threading
+import time
 from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -11,7 +13,8 @@ import keyring.errors
 import pytest
 import requests
 from PySide6.QtCore import QDate, QSettings, Qt
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtGui import QBrush
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 # Guarantee headless offscreen Qt execution for offline test environments
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -20,8 +23,10 @@ from hikvision_downloader.core.models import (
     ByteCount,
     Camera,
     CameraNumber,
+    DownloadProgress,
     DownloadResult,
     ISODatetimeStr,
+    MegabitsPerSecond,
     Recording,
     RecordingDate,
     TrackId,
@@ -39,6 +44,7 @@ from hikvision_downloader.ui.main_window import (
     CameraRowWidget,
     MainWindow,
     ProfileComboBox,
+    WorkerActivity,
     resolve_default_output_dir,
 )
 from hikvision_downloader.ui.models import (
@@ -58,6 +64,7 @@ from hikvision_downloader.ui.settings import (
     load_profiles_from_settings,
     save_profile_to_settings,
 )
+from hikvision_downloader.ui.style import DARK_THEME_QSS, LIGHT_THEME_QSS
 from hikvision_downloader.ui.workers import (
     AuthWorker,
     DatesWorker,
@@ -561,13 +568,18 @@ def test_download_worker(
         save_csv=True,
     )
 
+    started_files: list[tuple[str, int]] = []
     completed_files: list[tuple[str, str, bool]] = []
     final_results: list[DownloadResult] = []
 
-    worker.signal_file_completed.connect(lambda f, s, sk: completed_files.append((f, s, sk)))
-    worker.signal_finished.connect(lambda res: final_results.append(res))
+    worker.signal_file_started.connect(lambda f, wid: started_files.append((f, wid)), Qt.ConnectionType.DirectConnection)
+    worker.signal_file_completed.connect(lambda f, s, sk: completed_files.append((f, s, sk)), Qt.ConnectionType.DirectConnection)
+    worker.signal_finished.connect(lambda res: final_results.append(res), Qt.ConnectionType.DirectConnection)
 
     worker.run()
+    assert len(started_files) == 1
+    assert started_files[0][0] == sample_recording_item.filename
+    assert started_files[0][1] in (1, 2)
     assert len(completed_files) == 1
     assert completed_files[0][1] == "Completed"
     assert len(final_results) == 1
@@ -848,7 +860,7 @@ def test_console_3tier_hierarchy_and_progress(qapp: QApplication) -> None:
     window._on_download_progress(prog)
     assert window.overall_progress_bar.value() == 25  # (0 + 0.5) / 2 = 25%
     assert "ch01_20261002_100000.mp4" in window.progress_readout.text()
-    assert "24.5 Mbps" in window.progress_readout.text()
+    assert "3.1 MB/s" in window.progress_readout.text()
 
 
 def test_twin_summary_badges_reactivity(qapp: QApplication, sample_camera: Camera) -> None:
@@ -1001,6 +1013,188 @@ def test_dropdown_dynamic_refresh_and_keychain_loading_after_disconnect(
 
     # Cleanup
     s.clear()
+
+
+def test_download_worker_concurrent_two_workers(
+    qapp: QApplication,
+    sample_camera: Camera,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that setting Concurrent Workers to 2 actively downloads 2 files concurrently."""
+    rec1 = Recording(
+        start=ISODatetimeStr("2026-10-02T10:00:00Z"),
+        end=ISODatetimeStr("2026-10-02T10:30:00Z"),
+        name="segment1.mp4",
+        size_bytes=ByteCount(2048),
+        playback_uri="rtsp://192.168.1.100/Streaming/tracks/101?starttime=20261002T100000Z",
+    )
+    rec2 = Recording(
+        start=ISODatetimeStr("2026-10-02T10:30:00Z"),
+        end=ISODatetimeStr("2026-10-02T11:00:00Z"),
+        name="segment2.mp4",
+        size_bytes=ByteCount(4096),
+        playback_uri="rtsp://192.168.1.100/Streaming/tracks/101?starttime=20261002T103000Z",
+    )
+    item1 = RecordingItem(recording=rec1, camera=sample_camera, stream="HD", track_id=TrackId(101))
+    item2 = RecordingItem(recording=rec2, camera=sample_camera, stream="HD", track_id=TrackId(101))
+
+    simultaneous_active = 0
+    max_simultaneous = 0
+    lock = threading.Lock()
+
+    def mock_concurrent_download(*args: object, **kwargs: object) -> tuple[bool, float, ByteCount, bool, str | None]:
+        nonlocal simultaneous_active, max_simultaneous
+        with lock:
+            simultaneous_active += 1
+            max_simultaneous = max(max_simultaneous, simultaneous_active)
+
+        time.sleep(0.05)
+        dest: Path = kwargs["destination"]  # type: ignore[assignment]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x" * 1024)
+
+        with lock:
+            simultaneous_active -= 1
+
+        return True, 0.05, ByteCount(1024), False, None
+
+    monkeypatch.setattr("hikvision_downloader.ui.workers.download_recording", mock_concurrent_download)
+
+    session = requests.Session()
+    worker = DownloadWorker(
+        session=session,
+        host="192.168.1.100",
+        port=80,
+        selected_items=[item1, item2],
+        output_root=tmp_path,
+        max_workers=2,
+        save_csv=True,
+    )
+
+    started_events: list[tuple[str, int]] = []
+    completed_events: list[tuple[str, str, bool]] = []
+    final_results: list[DownloadResult] = []
+
+    worker.signal_file_started.connect(lambda f, wid: started_events.append((f, wid)), Qt.ConnectionType.DirectConnection)
+    worker.signal_file_completed.connect(lambda f, s, sk: completed_events.append((f, s, sk)), Qt.ConnectionType.DirectConnection)
+    worker.signal_finished.connect(lambda res: final_results.append(res), Qt.ConnectionType.DirectConnection)
+
+    worker.run()
+
+    assert len(started_events) == 2
+    worker_ids = {wid for _, wid in started_events}
+    assert worker_ids.issubset({1, 2})
+    assert len(completed_events) == 2
+    assert max_simultaneous == 2
+    assert len(final_results) == 1
+    assert final_results[0].success is True
+    assert final_results[0].downloaded_files == 2
+
+
+def test_recordings_table_model_live_status_styling(
+    qapp: QApplication,
+    sample_recording_item: RecordingItem,
+) -> None:
+    """Verify that 'Downloading (45%)' status is rendered in cyan (#38BDF8)."""
+    model = RecordingsTableModel()
+    model.set_recordings([sample_recording_item])
+
+    model.update_item_status(sample_recording_item.filename, "Downloading (45%)")
+    status_idx = model.index(0, RecordingsTableModel.COL_STATUS)
+
+    assert model.data(status_idx, Qt.ItemDataRole.DisplayRole) == "Downloading (45%)"
+    brush = model.data(status_idx, Qt.ItemDataRole.ForegroundRole)
+    assert isinstance(brush, QBrush)
+    assert brush.color().name().lower() == "#38bdf8"
+
+
+def test_table_column_widths_and_clear_button(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that camera and recording tables have tightened 28px/30px padding and Clear button."""
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_password", lambda h, u, p: None)
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_credential", lambda h, u, p: (u, None))
+
+    window = MainWindow()
+
+    # Verify column widths on left Cameras table
+    assert window.cameras_table.columnWidth(CamerasTableModel.COL_CHECK) == 28
+    assert window.cameras_table.columnWidth(CamerasTableModel.COL_NUM) == 30
+
+    # Verify column widths on right Recordings table
+    assert window.table_view.columnWidth(RecordingsTableModel.COL_CHECK) == 28
+    assert window.table_view.columnWidth(RecordingsTableModel.COL_NUM) == 30
+
+    # Verify 'Clear' button above cameras table
+    buttons = window.findChildren(QPushButton)
+    btn_texts = [b.text() for b in buttons]
+    assert "Clear" in btn_texts
+    assert "Deselect" not in btn_texts
+
+
+def test_calendar_dark_light_theme_styles() -> None:
+    """Verify that calendar navigation buttons and arrows are styled in dark and light themes."""
+    assert "QCalendarWidget QToolButton" in DARK_THEME_QSS
+    assert "#qt_calendar_prevmonth" in DARK_THEME_QSS
+    assert "#qt_calendar_nextmonth" in DARK_THEME_QSS
+    assert "color: #F8FAFC;" in DARK_THEME_QSS
+    assert "background-color: #334155;" in DARK_THEME_QSS
+
+    assert "QCalendarWidget QToolButton" in LIGHT_THEME_QSS
+    assert "#qt_calendar_prevmonth" in LIGHT_THEME_QSS
+    assert "#qt_calendar_nextmonth" in LIGHT_THEME_QSS
+
+
+def test_main_window_multi_worker_progress_reporting(
+    qapp: QApplication,
+    sample_camera: Camera,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify live multi-worker feedback string formatting in console readout."""
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_password", lambda h, u, p: None)
+    monkeypatch.setattr("hikvision_downloader.ui.main_window.get_nvr_credential", lambda h, u, p: (u, None))
+
+    window = MainWindow()
+    window._worker_activities = {
+        1: WorkerActivity(worker_id=1),
+        2: WorkerActivity(worker_id=2),
+    }
+    window._total_batch_files = 2
+
+    # Start Worker 1 and Worker 2
+    window._on_file_started("cam1_segment1.mp4", 1)
+    window._on_file_started("cam1_segment2.mp4", 2)
+
+    # Progress for Worker 1: 45% at 3.2 MB/s (25.6 Mbps)
+    prog1 = DownloadProgress(
+        current_index=1,
+        total_files=2,
+        filename="cam1_segment1.mp4",
+        bytes_downloaded=ByteCount(450),
+        file_size_bytes=ByteCount(1000),
+        speed_mbps=MegabitsPerSecond(25.6),
+        elapsed_seconds=1.0,
+    )
+    window._on_download_progress(prog1)
+
+    # Progress for Worker 2: 12% at 2.9 MB/s (23.2 Mbps)
+    prog2 = DownloadProgress(
+        current_index=2,
+        total_files=2,
+        filename="cam1_segment2.mp4",
+        bytes_downloaded=ByteCount(120),
+        file_size_bytes=ByteCount(1000),
+        speed_mbps=MegabitsPerSecond(23.2),
+        elapsed_seconds=1.0,
+    )
+    window._on_download_progress(prog2)
+
+    readout = window.progress_readout.text()
+    assert "Worker 1: [cam1_segment1.mp4] 45% (3.2 MB/s)" in readout
+    assert "Worker 2: [cam1_segment2.mp4] 12% (2.9 MB/s)" in readout
+
 
 
 

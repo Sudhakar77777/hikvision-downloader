@@ -1,7 +1,9 @@
 """Background QThread workers for non-blocking NVR operations in the Qt desktop UI."""
 
+import queue
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -316,6 +318,7 @@ class DownloadWorker(QThread):
     """Background worker orchestrating concurrent batch downloads across selected segments."""
 
     signal_started = Signal()
+    signal_file_started = Signal(str, int)  # filename, worker_id
     signal_progress = Signal(object)  # DownloadProgress
     signal_file_completed = Signal(str, str, bool)  # filename, status, is_skipped
     signal_finished = Signal(object)  # DownloadResult
@@ -382,23 +385,8 @@ class DownloadWorker(QThread):
                 groups[key] = []
             groups[key].append((global_idx, item))
 
-        batch_start_time = time.monotonic()
-        downloaded_count = 0
-        skipped_count = 0
-        downloaded_bytes = 0
-        failed_idx: int | None = None
-        error_msg: str | None = None
-
-        lock = threading.Lock()
-
-        # Thread-safe progress adapter
-        def _progress_adapter(prog: DownloadProgress) -> None:
-            self.signal_progress.emit(prog)
-
+        work_items: list[tuple[int, int, RecordingItem, Path, str]] = []
         for (cam_num, cam_name, stream, date_str), group_items in groups.items():
-            if self._cancel_event.is_set():
-                break
-
             folder_name = f"{date_str}_D{cam_num}_{cam_name.replace(' ', '_')}_{stream}"
             dest_dir = self.output_root / folder_name
             dest_dir.mkdir(parents=True, exist_ok=True)
@@ -418,15 +406,41 @@ class DownloadWorker(QThread):
                 except (OSError, ValueError) as csv_err:
                     self.signal_log.emit("WARN", f"Could not write CSV manifest: {csv_err}")
 
-            # Download items in this group
             for local_idx, (global_idx, item) in enumerate(group_items, start=1):
-                if self._cancel_event.is_set():
-                    break
-
                 target_filename = f"{local_idx}_{item.filename}" if item.filename.endswith(".mp4") else f"{local_idx}_{item.filename}.mp4"
-                destination = dest_dir / target_filename
+                work_items.append((global_idx, local_idx, item, dest_dir, target_filename))
 
-                self.signal_log.emit("INFO", f"[{global_idx}/{total_files}] Downloading {target_filename}...")
+        batch_start_time = time.monotonic()
+        downloaded_count = 0
+        skipped_count = 0
+        downloaded_bytes = 0
+        failed_idx: int | None = None
+        error_msg: str | None = None
+
+        lock = threading.Lock()
+        worker_id_queue: queue.Queue[int] = queue.Queue()
+        for wid in range(1, self.max_workers + 1):
+            worker_id_queue.put(wid)
+
+        # Thread-safe progress adapter
+        def _progress_adapter(prog: DownloadProgress) -> None:
+            self.signal_progress.emit(prog)
+
+        def _download_task(
+            global_idx: int,
+            local_idx: int,
+            item: RecordingItem,
+            dest_dir: Path,
+            target_filename: str,
+        ) -> tuple[int, RecordingItem, str, bool, float, ByteCount, bool, str | None]:
+            if self._cancel_event.is_set():
+                return global_idx, item, target_filename, False, 0.0, ByteCount(0), False, "Download cancelled"
+
+            worker_id = worker_id_queue.get()
+            destination = dest_dir / target_filename
+            try:
+                self.signal_file_started.emit(item.filename, worker_id)
+                self.signal_log.emit("INFO", f"[Worker {worker_id}] [{global_idx}/{total_files}] Downloading {target_filename}...")
 
                 success, duration, actual_size, is_skipped, err = download_recording(
                     session=self.session,
@@ -441,11 +455,31 @@ class DownloadWorker(QThread):
                     progress_callback=_progress_adapter,
                     cancel_event=self._cancel_event,
                 )
+                return global_idx, item, target_filename, success, duration, actual_size, is_skipped, err
+            finally:
+                worker_id_queue.put(worker_id)
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_item = {
+                executor.submit(_download_task, g_idx, l_idx, itm, d_dir, t_name): (g_idx, itm, t_name)
+                for g_idx, l_idx, itm, d_dir, t_name in work_items
+            }
+
+            for future in as_completed(future_to_item):
+                try:
+                    g_idx, item, target_filename, success, duration, actual_size, is_skipped, err = future.result()
+                except (requests.RequestException, OSError, RuntimeError, ValueError) as exc:
+                    g_idx, item, target_filename = future_to_item[future]
+                    success = False
+                    duration = 0.0
+                    actual_size = ByteCount(0)
+                    is_skipped = False
+                    err = str(exc)
 
                 with lock:
                     if not success:
                         if failed_idx is None:
-                            failed_idx = global_idx
+                            failed_idx = g_idx
                             error_msg = err or "Download failed"
                             self._cancel_event.set()
                         self.signal_file_completed.emit(item.filename, "Failed", False)

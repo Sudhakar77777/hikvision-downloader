@@ -362,7 +362,7 @@ class RecordingsTableModel(QAbstractTableModel):
             if col == self.COL_STATUS:
                 if item.status == "Completed":
                     return QBrush(QColor("#10B981"))
-                if item.status == "Downloading":
+                if item.status == "Downloading" or item.status.startswith("Downloading"):
                     return QBrush(QColor("#38BDF8"))
                 if item.status == "Skipped":
                     return QBrush(QColor("#F59E0B"))
@@ -444,7 +444,7 @@ class RecordingsTableModel(QAbstractTableModel):
     ) -> None:
         """Update status for a specific recording file by name."""
         for row, item in enumerate(self._items):
-            if item.filename == filename or filename.endswith(item.filename):
+            if item.filename == filename or filename.endswith(item.filename) or item.filename.endswith(filename):
                 item.status = status
                 if error:
                     item.error_message = error
