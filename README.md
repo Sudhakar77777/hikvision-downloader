@@ -422,6 +422,12 @@ HIKVISION_MAX_WORKERS=2
 uv run hikvision-downloader
 ```
 
+ Launch the native PySide6 Desktop Operator GUI:
+
+```bash
+uv run hikvision-downloader-gui
+```
+
  Or run in headless automation mode with flags:
 
 ```bash

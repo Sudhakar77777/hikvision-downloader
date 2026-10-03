@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1B3651" />
+      <stop offset="100%" stop-color="#121820" />
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF8A3D" />
+      <stop offset="100%" stop-color="#F37021" />
+    </linearGradient>
+    <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2DD4BF" />
+      <stop offset="100%" stop-color="#1E6B7B" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <!-- Base Rounded Container -->
+  <rect x="32" y="32" width="448" height="448" rx="96" fill="url(#bgGrad)" stroke="#2E3D52" stroke-width="8" filter="url(#shadow)"/>
+
+  <!-- Camera Body Housing -->
+  <path d="M128 176 C128 152 148 132 172 132 L340 132 C364 132 384 152 384 176 L384 276 C384 300 364 320 340 320 L172 320 C148 320 128 300 128 276 Z" fill="#1E293B" stroke="#334155" stroke-width="6"/>
+
+  <!-- Camera Lens Outer Ring -->
+  <circle cx="256" cy="226" r="64" fill="#0F172A" stroke="url(#tealGrad)" stroke-width="8"/>
+
+  <!-- Camera Lens Inner Pupil -->
+  <circle cx="256" cy="226" r="38" fill="#1E3A8A" />
+  <circle cx="256" cy="226" r="22" fill="#0284C7" />
+  <circle cx="246" cy="216" r="8" fill="#FFFFFF" opacity="0.8"/>
+
+  <!-- IR Sensors / LED Dots -->
+  <circle cx="204" cy="174" r="5" fill="url(#orangeGrad)"/>
+  <circle cx="308" cy="174" r="5" fill="url(#orangeGrad)"/>
+
+  <!-- Download Arrow Accent (Flame Orange) -->
+  <g transform="translate(256, 360)">
+    <path d="M-40 0 L-14 0 L-14 -44 L14 -44 L14 0 L40 0 L0 44 Z" fill="url(#orangeGrad)" filter="url(#shadow)"/>
+  </g>
+
+  <!-- Camera Mounting Base -->
+  <path d="M216 132 L216 88 L296 88 L296 132 Z" fill="#334155"/>
+  <rect x="184" y="76" width="144" height="16" rx="8" fill="#475569"/>
+</svg>

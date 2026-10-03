@@ -27,7 +27,7 @@ Phase 4: Headless CLI Engine & Entry Point (Task 005) [COMPLETED]
    │
 Phase 5: NVR Authentication, ISAPI Auto-Discovery & Concurrent Engine (Task 006) [COMPLETED]
    │
-Phase 6: PySide6 Native Desktop GUI & Secure OS Credential Store (Task 007)
+Phase 6: PySide6 Native Desktop GUI & Secure OS Credential Store (Task 007) [COMPLETED]
    │
 Phase 7: Packaging, CI/CD, & Public Release (Task 008)
 ```
@@ -96,7 +96,7 @@ Phase 7: Packaging, CI/CD, & Public Release (Task 008)
 
 ### Phase 6: PySide6 Native Desktop GUI & Secure OS Credential Store
 - **Task ID:** `007-pyside6-desktop-ui`
-- **Status:** Planned
+- **Status:** **Completed**
 - **Deliverables:**
   - Build native PySide6 (Qt 6) desktop interface with modern styling.
   - Interactive calendar date picker highlighting available recording dates.
