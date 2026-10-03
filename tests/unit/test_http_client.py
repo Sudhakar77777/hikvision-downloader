@@ -20,7 +20,7 @@ def test_request_with_retry_401_fails_immediately_without_retrying() -> None:
     session.request.return_value = mock_resp
 
     with pytest.raises(RuntimeError, match="401 Unauthorized"):
-        request_with_retry(session, "GET", "http://192.168.1.5/ISAPI/test", max_retries=3, retry_wait=0.01)
+        request_with_retry(session, "GET", "http://192.168.1.100/ISAPI/test", max_retries=3, retry_wait=0.01)
 
     # CRITICAL: Must be called EXACTLY ONCE to avoid triggering NVR security lockouts
     assert session.request.call_count == 1
@@ -35,7 +35,7 @@ def test_request_with_retry_403_fails_immediately_without_retrying() -> None:
     session.request.return_value = mock_resp
 
     with pytest.raises(RuntimeError, match="403 Forbidden"):
-        request_with_retry(session, "GET", "http://192.168.1.5/ISAPI/test", max_retries=3, retry_wait=0.01)
+        request_with_retry(session, "GET", "http://192.168.1.100/ISAPI/test", max_retries=3, retry_wait=0.01)
 
     assert session.request.call_count == 1
 
@@ -53,6 +53,6 @@ def test_request_with_retry_transient_error_retries_and_recovers() -> None:
 
     session.request.side_effect = [resp_fail, resp_ok]
 
-    resp = request_with_retry(session, "GET", "http://192.168.1.5/ISAPI/test", max_retries=3, retry_wait=0.01)
+    resp = request_with_retry(session, "GET", "http://192.168.1.100/ISAPI/test", max_retries=3, retry_wait=0.01)
     assert resp.status_code == 200
     assert session.request.call_count == 2

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -24,18 +24,22 @@ from hikvision_downloader.core.recordings import (
 
 
 def test_build_search_xml_valid() -> None:
+    now = datetime.now(UTC)
+    start_time = (now - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00Z")
+    end_time = (now - timedelta(days=7)).strftime("%Y-%m-%dT23:59:59Z")
+
     xml = build_search_xml(
         track_id=TrackId(101),
-        start_time="2026-09-15T00:00:00Z",
-        end_time="2026-09-15T23:59:59Z",
+        start_time=start_time,
+        end_time=end_time,
         position=0,
         batch_size=10,
     )
     assert "<trackID>101</trackID>" in xml
     assert "<maxResults>10</maxResults>" in xml
     assert "<searchResultPostion>0</searchResultPostion>" in xml
-    assert "<startTime>2026-09-15T00:00:00Z</startTime>" in xml
-    assert "<endTime>2026-09-15T23:59:59Z</endTime>" in xml
+    assert f"<startTime>{start_time}</startTime>" in xml
+    assert f"<endTime>{end_time}</endTime>" in xml
 
 
 def test_build_search_xml_invalid() -> None:
@@ -209,10 +213,12 @@ def test_recording_total_size() -> None:
 
 
 def test_save_recording_list(tmp_path: Path) -> None:
+    target_date = (datetime.now(UTC) - timedelta(days=7)).date()
+    date_str = target_date.isoformat()
     recs = [
         Recording(
-            start=ISODatetimeStr("2026-09-15T00:00:00Z"),
-            end=ISODatetimeStr("2026-09-15T00:15:00Z"),
+            start=ISODatetimeStr(f"{date_str}T00:00:00Z"),
+            end=ISODatetimeStr(f"{date_str}T00:15:00Z"),
             name="ch01_1.mp4",
             size_bytes=ByteCount(1000),
             playback_uri="rtsp://192.168.1.100/ch1",
@@ -224,11 +230,11 @@ def test_save_recording_list(tmp_path: Path) -> None:
         camera_number=CameraNumber(1),
         camera_name="MainGate",
         stream_name="HD",
-        recording_date=date(2026, 9, 15),
+        recording_date=target_date,
     )
 
     assert csv_file.exists()
-    assert csv_file.name == "2026-09-15_D1_MainGate_HD_recording-list.csv"
+    assert csv_file.name == f"{date_str}_D1_MainGate_HD_recording-list.csv"
     lines = csv_file.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "number,name,start,end,size,playback_uri"
-    assert "1,ch01_1.mp4,2026-09-15T00:00:00Z,2026-09-15T00:15:00Z,1000,rtsp://192.168.1.100/ch1" in lines[1]
+    assert f"1,ch01_1.mp4,{date_str}T00:00:00Z,{date_str}T00:15:00Z,1000,rtsp://192.168.1.100/ch1" in lines[1]

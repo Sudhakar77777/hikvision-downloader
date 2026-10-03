@@ -1,5 +1,5 @@
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -68,7 +68,7 @@ def test_01_live_auth_and_device_info(
         response = request_with_retry(live_session, "GET", url, max_retries=1, timeout=10.0)
         assert response.status_code == 200, f"Expected 200 OK, got {response.status_code}"
         assert "<DeviceInfo" in response.text or "<deviceInfo" in response.text
-        print(f"\n[OK] Authenticated successfully to {endpoint} (HTTP 200 DeviceInfo)")
+        print("\n[OK] Authenticated successfully to NVR endpoint (HTTP 200 DeviceInfo)")
     except (requests.RequestException, RuntimeError, TimeoutError) as exc:
         pytest.skip(f"Live auth probe skipped/failed: {exc}")
 
@@ -119,8 +119,7 @@ def test_04_live_camera_discovery_service(
             timeout=10.0,
         )
         assert len(cameras) > 0
-        cam_summary = ", ".join(f"[{int(num)}] {c.name} (track {int(c.main_track)})" for num, c in sorted(cameras.items()))
-        print(f"\n[OK] Discovered {len(cameras)} cameras: {cam_summary}")
+        print(f"\n[OK] Discovered {len(cameras)} camera channels successfully")
     except (requests.RequestException, RuntimeError, TimeoutError, ValueError) as exc:
         pytest.skip(f"Camera discovery service skipped/failed: {exc}")
 
@@ -129,9 +128,9 @@ def test_05_live_month_availability(
     live_session: requests.Session,
     live_nvr_config: dict[str, str | int],
 ) -> None:
-    """Step 5: Test querying daily recording distribution for current month."""
+    """Step 5: Test querying daily recording distribution for active recording month."""
     endpoint = format_host_port(str(live_nvr_config["host"]), int(live_nvr_config["port"]))
-    now = datetime.now(UTC)
+    target_date = (datetime.now(UTC) - timedelta(days=7)).date()
 
     discovery_service = CameraDiscoveryService()
     try:
@@ -148,8 +147,8 @@ def test_05_live_month_availability(
             session=live_session,
             host=endpoint,
             track_id=track_id,
-            year=now.year,
-            month=now.month,
+            year=target_date.year,
+            month=target_date.month,
             timeout=10.0,
         )
         assert isinstance(months, list)
@@ -162,9 +161,9 @@ def test_06_live_recording_search(
     live_session: requests.Session,
     live_nvr_config: dict[str, str | int],
 ) -> None:
-    """Step 6: Test searching for recordings on a specific track and date."""
+    """Step 6: Test searching for recordings on a specific track and historical date (1 week ago)."""
     endpoint = format_host_port(str(live_nvr_config["host"]), int(live_nvr_config["port"]))
-    today = datetime.now(UTC).date()
+    target_date = (datetime.now(UTC) - timedelta(days=7)).date()
 
     discovery_service = CameraDiscoveryService()
     try:
@@ -181,13 +180,34 @@ def test_06_live_recording_search(
             session=live_session,
             host=endpoint,
             track_id=track_id,
-            recording_date=today,
+            recording_date=target_date,
             position=0,
             batch_size=10,
             timeout=10.0,
         )
+        if not recs:
+            available = search_month(
+                session=live_session,
+                host=endpoint,
+                track_id=track_id,
+                year=target_date.year,
+                month=target_date.month,
+                timeout=10.0,
+            )
+            if available:
+                target_date = available[-1].value
+                recs = search_recordings(
+                    session=live_session,
+                    host=endpoint,
+                    track_id=track_id,
+                    recording_date=target_date,
+                    position=0,
+                    batch_size=10,
+                    timeout=10.0,
+                )
+
         assert isinstance(recs, list)
-        print(f"\n[OK] Search recordings on track {int(track_id)} for date {today} returned {len(recs)} recordings")
+        print(f"\n[OK] Search recordings on track {int(track_id)} for date {target_date} returned {len(recs)} recordings")
     except (requests.RequestException, RuntimeError, TimeoutError, ValueError) as exc:
         pytest.skip(f"Search recordings skipped/failed: {exc}")
 
@@ -196,9 +216,9 @@ def test_07_live_download_stream_sample(
     live_session: requests.Session,
     live_nvr_config: dict[str, str | int],
 ) -> None:
-    """Step 7: Test downloading and streaming actual video payload from NVR hardware."""
+    """Step 7: Test downloading and streaming actual video payload from NVR hardware using a date from 1 week ago."""
     endpoint = format_host_port(str(live_nvr_config["host"]), int(live_nvr_config["port"]))
-    today = datetime.now(UTC).date()
+    target_date = (datetime.now(UTC) - timedelta(days=7)).date()
 
     discovery_service = CameraDiscoveryService()
     try:
@@ -215,13 +235,34 @@ def test_07_live_download_stream_sample(
             session=live_session,
             host=endpoint,
             track_id=track_id,
-            recording_date=today,
+            recording_date=target_date,
             position=0,
             batch_size=1,
             timeout=10.0,
         )
         if not recs:
-            pytest.skip(f"No recordings available today ({today}) on track {track_id} to test download stream")
+            available = search_month(
+                session=live_session,
+                host=endpoint,
+                track_id=track_id,
+                year=target_date.year,
+                month=target_date.month,
+                timeout=10.0,
+            )
+            if available:
+                target_date = available[-1].value
+                recs = search_recordings(
+                    session=live_session,
+                    host=endpoint,
+                    track_id=track_id,
+                    recording_date=target_date,
+                    position=0,
+                    batch_size=1,
+                    timeout=10.0,
+                )
+
+        if not recs:
+            pytest.skip(f"No recordings available near date {target_date} on track {track_id} to test download stream")
 
         rec = recs[0]
         download_url = build_download_url(
@@ -254,7 +295,7 @@ def test_07_live_download_stream_sample(
 
         total_size_mb = int(rec.size_bytes) / (1024 * 1024)
         print(
-            f"\n[OK] Successfully streamed live camera data for {rec.name}: "
+            f"\n[OK] Successfully streamed video payload: "
             f"HTTP {response.status_code}, total file size: {total_size_mb:.2f} MB, "
             f"first chunk read: {len(chunk)} bytes (Header signature: {chunk[:8]!r})"
         )

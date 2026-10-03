@@ -21,3 +21,4 @@ output*
 
 # Local camera configuration
 config/cameras.toml
+config/no-cameras.toml

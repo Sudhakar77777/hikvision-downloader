@@ -1,6 +1,6 @@
 import signal
 import threading
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -632,6 +632,10 @@ def test_render_progress_bar() -> None:
 
 
 def test_display_download_progress_with_time(capsys: pytest.CaptureFixture[str]) -> None:
+    now = datetime.now(UTC)
+    start_iso = (now - timedelta(days=7, minutes=15)).strftime("%Y-%m-%dT10:00:00Z")
+    end_iso = (now - timedelta(days=7)).strftime("%Y-%m-%dT10:15:00Z")
+
     prog = DownloadProgress(
         current_index=1,
         total_files=5,
@@ -642,8 +646,8 @@ def test_display_download_progress_with_time(capsys: pytest.CaptureFixture[str])
         elapsed_seconds=2.5,
         is_skipped=False,
         is_completed=True,
-        start_time="2026-09-15T10:00:00Z",
-        end_time="2026-09-15T10:15:00Z",
+        start_time=start_iso,
+        end_time=end_iso,
     )
     display_download_progress(prog)
     captured = capsys.readouterr().out
@@ -651,6 +655,10 @@ def test_display_download_progress_with_time(capsys: pytest.CaptureFixture[str])
 
 
 def test_display_download_progress_in_flight_non_tty(capsys: pytest.CaptureFixture[str]) -> None:
+    now = datetime.now(UTC)
+    start_iso = (now - timedelta(days=7, minutes=15)).strftime("%Y-%m-%dT10:15:00Z")
+    end_iso = (now - timedelta(days=7)).strftime("%Y-%m-%dT10:30:00Z")
+
     prog = DownloadProgress(
         current_index=2,
         total_files=5,
@@ -661,8 +669,8 @@ def test_display_download_progress_in_flight_non_tty(capsys: pytest.CaptureFixtu
         elapsed_seconds=0.0,
         is_skipped=False,
         is_completed=False,
-        start_time="2026-09-15T10:15:00Z",
-        end_time="2026-09-15T10:30:00Z",
+        start_time=start_iso,
+        end_time=end_iso,
     )
     display_download_progress(prog)
     captured = capsys.readouterr().out
@@ -671,17 +679,25 @@ def test_display_download_progress_in_flight_non_tty(capsys: pytest.CaptureFixtu
 
 def test_display_download_summary_with_time_span(sample_cameras: dict[CameraNumber, Camera], capsys: pytest.CaptureFixture[str]) -> None:
     camera = sample_cameras[CameraNumber(1)]
+    target_date = (datetime.now(UTC) - timedelta(days=7)).date()
+    target_date_str = target_date.isoformat()
+
+    start_iso_1 = f"{target_date_str}T00:00:00Z"
+    end_iso_1 = f"{target_date_str}T00:15:00Z"
+    start_iso_2 = f"{target_date_str}T00:15:00Z"
+    end_iso_2 = f"{target_date_str}T00:30:00Z"
+
     recs = [
         Recording(
-            start=ISODatetimeStr("2026-09-15T00:00:00Z"),
-            end=ISODatetimeStr("2026-09-15T00:15:00Z"),
+            start=ISODatetimeStr(start_iso_1),
+            end=ISODatetimeStr(end_iso_1),
             name="rec1.mp4",
             size_bytes=ByteCount(10_000_000),
             playback_uri="rtsp://192.168.1.100/1",
         ),
         Recording(
-            start=ISODatetimeStr("2026-09-15T00:15:00Z"),
-            end=ISODatetimeStr("2026-09-15T00:30:00Z"),
+            start=ISODatetimeStr(start_iso_2),
+            end=ISODatetimeStr(end_iso_2),
             name="rec2.mp4",
             size_bytes=ByteCount(10_000_000),
             playback_uri="rtsp://192.168.1.100/2",
@@ -698,7 +714,7 @@ def test_display_download_summary_with_time_span(sample_cameras: dict[CameraNumb
     display_download_summary(
         camera=camera,
         stream=StreamType.MAIN,
-        recording_date=date(2026, 9, 15),
+        recording_date=target_date,
         track_id=TrackId(101),
         selection=(1, 2),
         search_duration=0.2,
@@ -707,7 +723,7 @@ def test_display_download_summary_with_time_span(sample_cameras: dict[CameraNumb
         output_dir=Path("/path/to/output"),
     )
     captured = capsys.readouterr().out
-    assert "Time span:       2026-09-15 00:00:00 -> 2026-09-15 00:30:00" in captured
+    assert f"Time span:       {target_date_str} 00:00:00 -> {target_date_str} 00:30:00" in captured
     assert "Recordings:      1-2" in captured
     assert "Output folder:   /path/to/output" in captured
 

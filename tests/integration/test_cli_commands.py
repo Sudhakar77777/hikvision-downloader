@@ -1,7 +1,7 @@
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -120,13 +120,13 @@ def test_live_cli_execution_with_nvr(tmp_path: Path) -> None:
     if not host or not (username and password):
         pytest.skip("Integration test skipped: HIKVISION_HOST, HIKVISION_USERNAME, and HIKVISION_PASSWORD not configured in .env")
 
-    today_str = str(datetime.now(UTC).date())
+    yesterday_str = str(datetime.now(UTC).date() - timedelta(days=1))
     cmd = [
         sys.executable,
         "-m",
         "hikvision_downloader",
         "--date",
-        today_str,
+        yesterday_str,
         "--camera",
         "1",
         "--stream",

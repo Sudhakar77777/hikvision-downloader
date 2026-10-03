@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -103,9 +103,10 @@ def test_camera_invalid_stream_type() -> None:
 
 
 def test_recording_date_valid() -> None:
-    rec_date = RecordingDate(year=2026, month=9, day=15)
-    assert rec_date.value == date(2026, 9, 15)
-    assert rec_date.iso == "2026-09-15"
+    target = (datetime.now(UTC) - timedelta(days=7)).date()
+    rec_date = RecordingDate(year=target.year, month=target.month, day=target.day)
+    assert rec_date.value == target
+    assert rec_date.iso == target.isoformat()
 
 
 def test_recording_date_invalid_calendar() -> None:
@@ -123,22 +124,34 @@ def test_recording_date_invalid_calendar() -> None:
 
 
 def test_recording_model_valid() -> None:
+    now = datetime.now(UTC)
+    start_dt = now - timedelta(days=7, minutes=15)
+    end_dt = now - timedelta(days=7)
+    start_iso = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     rec = Recording(
-        start=ISODatetimeStr("2026-09-15T00:00:00Z"),
-        end=ISODatetimeStr("2026-09-15T00:15:00Z"),
-        name="ch01_20260915_000000.mp4",
+        start=ISODatetimeStr(start_iso),
+        end=ISODatetimeStr(end_iso),
+        name="ch01_segment.mp4",
         size_bytes=ByteCount(104857600),
         playback_uri="rtsp://192.168.1.100/Streaming/tracks/101",
     )
     assert rec.size_mb == 100.0
     assert rec.size == ByteCount(104857600)
+    assert rec.start == start_iso
+    assert rec.end == end_iso
 
 
 def test_recording_model_negative_size() -> None:
+    now = datetime.now(UTC)
+    start_iso = (now - timedelta(days=7, minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_iso = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     with pytest.raises(ValidationError):
         Recording(
-            start=ISODatetimeStr("2026-09-15T00:00:00Z"),
-            end=ISODatetimeStr("2026-09-15T00:15:00Z"),
+            start=ISODatetimeStr(start_iso),
+            end=ISODatetimeStr(end_iso),
             name="ch01.mp4",
             size_bytes=ByteCount(-1),
             playback_uri="rtsp://192.168.1.100/ch01",
@@ -180,6 +193,10 @@ def test_nvr_connection_profile_valid() -> None:
 
 
 def test_download_progress_valid() -> None:
+    now = datetime.now(UTC)
+    start_iso = (now - timedelta(days=7, minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_iso = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     prog = DownloadProgress(
         current_index=1,
         total_files=5,
@@ -189,13 +206,13 @@ def test_download_progress_valid() -> None:
         speed_mbps=MegabitsPerSecond(12.5),
         elapsed_seconds=1.2,
         is_skipped=False,
-        start_time="2026-09-14T23:58:29Z",
-        end_time="2026-09-15T00:00:40Z",
+        start_time=start_iso,
+        end_time=end_iso,
     )
     assert prog.current_index == 1
     assert prog.is_skipped is False
-    assert prog.start_time == "2026-09-14T23:58:29Z"
-    assert prog.end_time == "2026-09-15T00:00:40Z"
+    assert prog.start_time == start_iso
+    assert prog.end_time == end_iso
 
 
 def test_download_progress_invalid() -> None:
