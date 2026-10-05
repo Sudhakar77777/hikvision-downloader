@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HikVision Downloader — Standalone High-Speed CCTV Video Archiver</title>
+  <meta name="description" content="High-speed standalone desktop and CLI application to discover, query, and download surveillance video footage from HikVision NVRs and IP cameras.">
+  <meta name="keywords" content="HikVision, CCTV, Downloader, NVR, Surveillance, Video Backup, ISAPI, PySide6, Python 3.14">
+  <meta name="author" content="Arivedha">
+  
+  <!-- Open Graph / Social Cards -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="HikVision Downloader — High-Speed CCTV Video Archiving">
+  <meta property="og:description" content="Download CCTV footage with multi-worker acceleration and zero-trust keychain security.">
+  <meta property="og:image" content="assets/gui-dark.jpg">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="header">
+    <div class="container nav-container">
+      <a href="#" class="brand">
+        <div class="brand-icon">
+          <svg width="32" height="32" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="60" height="60" rx="14" fill="#162032" stroke="#2DD4BF" stroke-width="2"/>
+            <circle cx="32" cy="28" r="14" fill="#0F172A" stroke="#2DD4BF" stroke-width="3"/>
+            <circle cx="32" cy="28" r="7" fill="#0284C7"/>
+            <circle cx="30" cy="26" r="2.5" fill="#FFFFFF"/>
+            <path d="M26 44 L30 44 L30 38 L34 38 L34 44 L38 44 L32 52 Z" fill="#F37021"/>
+          </svg>
+        </div>
+        <span class="brand-title">HikVision Downloader</span>
+        <span class="brand-badge">v0.1.1</span>
+      </a>
+
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#preview">Interface</a></li>
+        <li><a href="#cli">CLI Quickstart</a></li>
+        <li><a href="#specs">Specifications</a></li>
+        <li><a href="https://github.com/Sudhakar77777/hikvision-downloader/blob/main/docs/architecture.md" target="_blank" rel="noopener noreferrer">Architecture</a></li>
+      </ul>
+
+      <div class="nav-actions">
+        <a href="https://github.com/Sudhakar77777/hikvision-downloader" class="btn-github" target="_blank" rel="noopener noreferrer">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="hero-glow"></div>
+    <div class="container hero-content">
+      <div class="hero-badge">
+        <span>⚡ High-Performance CCTV Archiving Engine</span>
+      </div>
+
+      <h1 class="hero-title">
+        High-Speed CCTV Video Archiving <br/>
+        <span class="hero-title-highlight">Made Effortless</span>
+      </h1>
+
+      <p class="hero-subtitle">
+        A standalone desktop & CLI application designed to rapidly discover, query, and download surveillance footage from HikVision NVRs and IP cameras with multi-threaded performance and zero-trust OS keychain security.
+      </p>
+
+      <div class="cta-group">
+        <a href="https://github.com/Sudhakar77777/hikvision-downloader/releases/latest/download/HikVision-Downloader-macOS.dmg" class="btn btn-primary-orange" id="btn-download-macos">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 1.01-2.87-.96.04-2.12.64-2.8 1.44-.59.69-.99 1.77-.96 2.82 1.07.08 2.13-.57 2.75-1.39z"/>
+          </svg>
+          Download for macOS (.dmg)
+        </a>
+
+        <a href="https://github.com/Sudhakar77777/hikvision-downloader/releases/latest/download/HikVision-Downloader-Windows-x64.zip" class="btn btn-primary-teal" id="btn-download-windows">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.951-1.951"/>
+          </svg>
+          Download for Windows (.zip)
+        </a>
+
+        <a href="#cli" class="btn btn-secondary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          CLI Terminal
+        </a>
+      </div>
+
+      <div class="hero-meta">
+        <span>✓ AGPL-3.0 License</span>
+        <span>•</span>
+        <span>✓ No Java/C++ runtime needed</span>
+        <span>•</span>
+        <span>✓ Zero Cloud Telemetry</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Screenshot Preview Section -->
+  <section class="preview-section" id="preview">
+    <div class="container">
+      <div class="preview-container">
+        <div class="preview-toolbar">
+          <div class="preview-dots">
+            <div class="dot dot-red"></div>
+            <div class="dot dot-yellow"></div>
+            <div class="dot dot-green"></div>
+          </div>
+          <div class="theme-switcher">
+            <button class="theme-tab active" id="tab-dark" onclick="setPreviewTheme('dark')">Dark Theme</button>
+            <button class="theme-tab" id="tab-light" onclick="setPreviewTheme('light')">Light Theme</button>
+          </div>
+        </div>
+        <div class="preview-image-wrapper">
+          <img src="assets/gui-dark.jpg" alt="HikVision Downloader Dark UI" id="img-preview-dark" class="preview-img">
+          <img src="assets/gui-light.jpg" alt="HikVision Downloader Light UI" id="img-preview-light" class="preview-img hidden">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Core Features Grid -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="section-title-wrap">
+        <div class="section-tag">Engine Highlights</div>
+        <h2 class="section-title">Built for Mission-Critical CCTV Extraction</h2>
+        <p class="section-subtitle">Engineered specifically to solve the bottleneck of slow, proprietary CCTV web players with a resilient, concurrent downloading architecture.</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- Feature 1 -->
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+          </div>
+          <h3 class="feature-title">Multi-Worker Parallel Engine</h3>
+          <p class="feature-desc">Download multiple video segments concurrently across separate worker threads with per-worker speed gauges, bandwidth throttling, and automatic resumption.</p>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+          </div>
+          <h3 class="feature-title">Zero-Trust Keychain Security</h3>
+          <p class="feature-desc">Hardware-backed OS Keychain and Windows Credential Manager integration ensures plain-text passwords are never saved on disk or exposed in logs.</p>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </div>
+          <h3 class="feature-title">Automated ISAPI Discovery</h3>
+          <p class="feature-desc">Scan local subnets to discover online HikVision devices, verify ISAPI endpoints, and auto-populate active camera channels and recording dates.</p>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+          </div>
+          <h3 class="feature-title">Smart Calendar & Segment Query</h3>
+          <p class="feature-desc">Interrogate NVR recording tracks to highlight active dates, filter by time window, and perform seamless MP4 segment aggregation with zero loss.</p>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </div>
+          <h3 class="feature-title">Dual Interface: GUI & CLI</h3>
+          <p class="feature-desc">Rich desktop application powered by PySide6 with custom dark/light themes, paired with a scriptable CLI for automated cron jobs and server pipelines.</p>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+          </div>
+          <h3 class="feature-title">Zero-Prerequisite Packaging</h3>
+          <p class="feature-desc">Self-contained binaries for macOS (.dmg) and Windows (.zip). No external Python, Qt, or FFmpeg installations required to start downloading.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CLI Quickstart Section -->
+  <section class="section cli-section" id="cli">
+    <div class="container cli-container">
+      <div class="cli-info">
+        <div class="section-tag">Headless Automation</div>
+        <h3>Instant CLI Execution</h3>
+        <p>Run ad-hoc queries, automated cron backups, or batch camera dumps without writing code or launching the graphical UI.</p>
+        <p>Install via <code>uvx</code> for instant ephemeral execution, or install into your environment using standard <code>pip</code>.</p>
+      </div>
+
+      <div class="terminal-card">
+        <div class="terminal-header">
+          <span class="terminal-title">bash — hikvision-downloader</span>
+          <button class="copy-btn" onclick="copyCliSnippet(this)">Copy</button>
+        </div>
+        <div class="terminal-body" id="cli-snippet">
+<span class="terminal-comment"># Ephemeral execution with uvx (no install needed)</span>
+<span class="terminal-prompt">$</span>uvx hikvision-downloader download \
+    --host 192.168.1.100 \
+    --username admin \
+    --camera 1 \
+    --start 2026-10-01T00:00:00 \
+    --end 2026-10-01T23:59:59 \
+    --output ./Archive
+
+<span class="terminal-comment"># Or install globally via pip</span>
+<span class="terminal-prompt">$</span>pip install hikvision-downloader
+<span class="terminal-prompt">$</span>hikvision-downloader-gui
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- System Specifications & Architecture -->
+  <section class="section" id="specs">
+    <div class="container">
+      <div class="section-title-wrap">
+        <div class="section-tag">System Specs</div>
+        <h2 class="section-title">Technical Specifications</h2>
+      </div>
+
+      <div class="features-grid">
+        <div class="feature-card">
+          <h3 class="feature-title">Supported Operating Systems</h3>
+          <ul style="color: var(--text-secondary); margin-left: 20px; line-height: 1.8;">
+            <li><strong>macOS:</strong> 12.0 (Monterey) through 15+ (Apple Silicon & Intel)</li>
+            <li><strong>Windows:</strong> Windows 10, Windows 11, Windows Server 2019+ (x64)</li>
+            <li><strong>Linux:</strong> Ubuntu 22.04+, Debian 12+, Arch, Fedora (via pip/uv)</li>
+          </ul>
+        </div>
+
+        <div class="feature-card">
+          <h3 class="feature-title">Hardware & Protocol Support</h3>
+          <ul style="color: var(--text-secondary); margin-left: 20px; line-height: 1.8;">
+            <li><strong>CCTV Protocols:</strong> HikVision ISAPI 2.0+, HTTP/HTTPS, Digest/Basic Auth</li>
+            <li><strong>Device Families:</strong> HikVision NVRs, DVRs, AcuSense, ColorVu, IP Cams</li>
+            <li><strong>Security:</strong> macOS Keychain, Windows Credential Manager, SecretService</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-content">
+        <div class="footer-brand">
+          <strong style="color: #FFFFFF;">HikVision Downloader</strong>
+          <span>High-Speed CCTV Video Archival Suite</span>
+        </div>
+        <ul class="footer-links">
+          <li><a href="https://github.com/Sudhakar77777/hikvision-downloader" target="_blank" rel="noopener noreferrer">GitHub Repository</a></li>
+          <li><a href="https://github.com/Sudhakar77777/hikvision-downloader/releases" target="_blank" rel="noopener noreferrer">Releases</a></li>
+          <li><a href="https://github.com/Sudhakar77777/hikvision-downloader/issues" target="_blank" rel="noopener noreferrer">Issue Tracker</a></li>
+          <li><a href="https://github.com/Sudhakar77777/hikvision-downloader/blob/main/docs/architecture.md" target="_blank" rel="noopener noreferrer">Architecture Guide</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-bottom">
+        <p>Released under the <strong>GNU Affero General Public License v3.0 (AGPLv3)</strong>.</p>
+        <p style="margin-top: 6px;">Copyright &copy; 2026 Arivedha. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function setPreviewTheme(theme) {
+      const darkImg = document.getElementById('img-preview-dark');
+      const lightImg = document.getElementById('img-preview-light');
+      const tabDark = document.getElementById('tab-dark');
+      const tabLight = document.getElementById('tab-light');
+
+      if (theme === 'light') {
+        darkImg.classList.add('hidden');
+        lightImg.classList.remove('hidden');
+        tabLight.classList.add('active');
+        tabDark.classList.remove('active');
+      } else {
+        lightImg.classList.add('hidden');
+        darkImg.classList.remove('hidden');
+        tabDark.classList.add('active');
+        tabLight.classList.remove('active');
+      }
+    }
+
+    function copyCliSnippet(btn) {
+      const text = "uvx hikvision-downloader download --host 192.168.1.100 --username admin --camera 1 --start 2026-10-01T00:00:00 --end 2026-10-01T23:59:59 --output ./Archive";
+      navigator.clipboard.writeText(text).then(() => {
+        const original = btn.innerText;
+        btn.innerText = "Copied!";
+        btn.style.color = "#2DD4BF";
+        btn.style.borderColor = "#2DD4BF";
+        setTimeout(() => {
+          btn.innerText = original;
+          btn.style.color = "";
+          btn.style.borderColor = "";
+        }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>

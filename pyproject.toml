@@ -42,6 +42,7 @@ extend-select = ["I"]
 [dependency-groups]
 dev = [
     "mypy>=1.15.0",
+    "pyinstaller>=6.11.0",
     "pytest>=8.0.0",
     "pytest-mock>=3.14.0",
     "ruff>=0.16.10",

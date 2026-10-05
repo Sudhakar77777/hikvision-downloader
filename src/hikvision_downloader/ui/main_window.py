@@ -65,6 +65,7 @@ from ..core.models import (
     RecordingDate,
     TrackId,
 )
+from ..paths import get_asset_path
 from .keychain import (
     delete_nvr_password,
     get_nvr_credential,
@@ -91,10 +92,10 @@ from .settings import (
 from .style import DARK_THEME_QSS, LIGHT_THEME_QSS
 from .workers import AuthWorker, DatesWorker, DiscoveryWorker, DownloadWorker, SearchWorker
 
-ASSETS_DIR: Path = Path(__file__).resolve().parent / "assets"
-LOGO_SVG_PATH: Path = ASSETS_DIR / "logo.svg"
-FAVICON_SVG_PATH: Path = ASSETS_DIR / "favicon.svg"
-ARIVEDHA_LOGO_SVG_PATH: Path = ASSETS_DIR / "arivedha_logo.svg"
+ASSETS_DIR: Path = get_asset_path("ui/assets")
+LOGO_SVG_PATH: Path = get_asset_path("ui/assets/logo.svg")
+FAVICON_SVG_PATH: Path = get_asset_path("ui/assets/favicon.svg")
+ARIVEDHA_LOGO_SVG_PATH: Path = get_asset_path("ui/assets/arivedha_logo.svg")
 
 
 def resolve_default_output_dir() -> Path:

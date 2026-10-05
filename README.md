@@ -26,12 +26,17 @@ Engineered to overcome web browser export freezes, concurrency bottlenecks, and 
 
 ## Quick Start & Installation
 
-### Option A: Standard Installation via pip
+### Option A: Standalone Desktop Installers (Zero Python Setup)
+Download the pre-packaged standalone application from the [GitHub Pages Download Portal](https://sudhakar77777.github.io/hikvision-downloader/) or direct from releases:
+- **macOS (Apple Silicon & Intel):** [Download .dmg](https://github.com/Sudhakar77777/hikvision-downloader/releases/latest/download/HikVision-Downloader-macOS.dmg)
+- **Windows (x64):** [Download .zip](https://github.com/Sudhakar77777/hikvision-downloader/releases/latest/download/HikVision-Downloader-Windows-x64.zip)
+
+### Option B: Standard Installation via pip
 ```bash
 pip install hikvision-downloader
 ```
 
-### Option B: Ephemeral Execution via uvx (No Install Required)
+### Option C: Ephemeral Execution via uvx (No Install Required)
 ```bash
 uvx hikvision-downloader --help
 ```

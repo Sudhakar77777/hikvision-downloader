@@ -110,13 +110,14 @@ Phase 7: Packaging, CI/CD, & Public Release (Task 008)
 ---
 
 ### Phase 7: Packaging, CI/CD, & Public Release
-- **Task ID:** `008-packaging-cicd-release`
-- **Status:** Planned
+- **Task ID:** `008-packaging-cicd-release` / `009-standalone-packaging-release-ghpages`
+- **Status:** **Completed**
 - **Deliverables:**
   - Set up GitHub Actions CI matrix testing (macOS, Windows, Ubuntu) for linting, type-checking (`mypy`), and pytest suites.
-  - Configure standalone desktop builds using PyInstaller / PySide6 deployment tools producing `.app`/`.dmg` (macOS) and `.exe` (Windows).
+  - Configured standalone desktop builds using PyInstaller producing `.app`/`.dmg` (macOS) and `.exe`/`.zip` (Windows).
   - Add official open-source license (`LICENSE`) and third-party dependency attribution (PySide6 LGPLv3 notices).
   - Publish build release workflow triggering on Git tags (`v1.0.0`) to upload GitHub Release binary assets and publish wheels to PyPI.
+  - Deploy operator-oriented GitHub Pages download portal (`site/index.html`).
 
 ---
 
