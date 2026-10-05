@@ -37,7 +37,6 @@ Refactor `src/hikvision_downloader/ui/` to guarantee true parallel downloads, pe
 - Change the progress signal definition to bind the worker ID explicitly:
   ```python
   signal_progress = Signal(int, object)  # worker_id: int, progress: DownloadProgress
-
 ```
 
 * Inside `_download_task()`:
@@ -48,6 +47,7 @@ Refactor `src/hikvision_downloader/ui/` to guarantee true parallel downloads, pe
 ```python
 last_emit_time = 0.0
 
+
 def _progress_adapter(prog: DownloadProgress) -> None:
     nonlocal last_emit_time
     now = time.monotonic()
@@ -55,7 +55,6 @@ def _progress_adapter(prog: DownloadProgress) -> None:
     if prog.is_completed or prog.is_skipped or (now - last_emit_time >= 0.1):
         last_emit_time = now
         self.signal_progress.emit(worker_id, prog)
-
 ```
 
 ---

@@ -189,7 +189,7 @@ def delete_nvr_password(host: str, username: str, port: int = 80) -> bool:
                 keyring.delete_password(KEYCHAIN_SERVICE, alt_key)
                 logger.debug("Deleted alternate keychain entry %s", alt_key)
                 deleted = True
-            except (keyring.errors.PasswordDeleteError, keyring.errors.KeyringError, OSError, RuntimeError, ValueError):
+            except keyring.errors.PasswordDeleteError, keyring.errors.KeyringError, OSError, RuntimeError, ValueError:
                 pass
 
     return deleted

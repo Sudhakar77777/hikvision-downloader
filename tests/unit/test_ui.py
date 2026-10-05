@@ -847,7 +847,6 @@ def test_user_input_can_be_cleared_without_autofill_recursion(qapp: QApplication
     assert window.password_input.text() == ""
 
 
-
 def test_console_3tier_hierarchy_and_progress(qapp: QApplication) -> None:
     """Test 3-tier console structure and telemetry updates."""
     from hikvision_downloader.core.models import DownloadProgress, MegabitsPerSecond
@@ -1262,7 +1261,7 @@ def test_download_worker_cancellation_state_purge_10_files(
     for i in range(1, 11):
         rec = Recording(
             start=ISODatetimeStr(f"2026-10-02T10:{i:02d}:00Z"),
-            end=ISODatetimeStr(f"2026-10-02T10:{i+1:02d}:00Z"),
+            end=ISODatetimeStr(f"2026-10-02T10:{i + 1:02d}:00Z"),
             name=f"rec_{i:02d}.mp4",
             size_bytes=ByteCount(1024 * 100),
             playback_uri=f"rtsp://192.168.1.100/{i}",
@@ -1379,7 +1378,7 @@ def test_main_window_cancellation_ui_purge(
     for i in range(1, 11):
         rec = Recording(
             start=ISODatetimeStr(f"2026-10-02T10:{i:02d}:00Z"),
-            end=ISODatetimeStr(f"2026-10-02T10:{i+1:02d}:00Z"),
+            end=ISODatetimeStr(f"2026-10-02T10:{i + 1:02d}:00Z"),
             name=f"video_{i:02d}.mp4",
             size_bytes=ByteCount(1024 * 1024),
             playback_uri=f"rtsp://192.168.1.100/{i}",
@@ -1480,7 +1479,7 @@ def test_download_worker_dedicated_sessions_and_direct_worker_telemetry(
     for i in range(1, 4):
         rec = Recording(
             start=ISODatetimeStr(f"2026-10-02T10:{i:02d}:00Z"),
-            end=ISODatetimeStr(f"2026-10-02T10:{i+1:02d}:00Z"),
+            end=ISODatetimeStr(f"2026-10-02T10:{i + 1:02d}:00Z"),
             name=f"stream_{i:02d}.mp4",
             size_bytes=ByteCount(1024 * 1024),
             playback_uri=f"rtsp://192.168.1.100/{i}",
@@ -1554,8 +1553,3 @@ def test_download_worker_dedicated_sessions_and_direct_worker_telemetry(
         assert isinstance(wid, int)
         assert 1 <= wid <= 3
         assert isinstance(prog, DownloadProgress)
-
-
-
-
-

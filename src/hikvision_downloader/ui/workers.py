@@ -540,7 +540,7 @@ class DownloadWorker(QThread):
             for sess in worker_sessions.values():
                 try:
                     sess.close()
-                except (requests.RequestException, OSError):
+                except requests.RequestException, OSError:
                     pass
 
         total_duration = time.monotonic() - batch_start_time

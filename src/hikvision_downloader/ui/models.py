@@ -33,7 +33,7 @@ def format_iso_display(iso_str: str) -> str:
             clean = clean.split(".")[0]
         dt = datetime.fromisoformat(clean)
         return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return str(iso_str)
 
 
@@ -55,7 +55,7 @@ def check_disk_space(
     try:
         usage = shutil.disk_usage(target if target.exists() else Path("."))
         free_bytes = usage.free
-    except (OSError, ValueError):
+    except OSError, ValueError:
         free_bytes = 0
 
     safety_buffer = safety_margin_mb * 1024 * 1024

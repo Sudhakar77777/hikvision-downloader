@@ -1644,13 +1644,9 @@ class MainWindow(QMainWindow):
         total_bytes = sum(item.size_bytes for item in self._table_model._items)
         selected_bytes = self._table_model.get_total_selected_size()
 
-        self.discovered_badge.setText(
-            f"{total_count} Segments Discovered · {format_size_human(total_bytes)}"
-        )
+        self.discovered_badge.setText(f"{total_count} Segments Discovered · {format_size_human(total_bytes)}")
         if selected_count > 0:
-            self.selected_badge.setText(
-                f"✓ {selected_count} Selected · {format_size_human(selected_bytes)}"
-            )
+            self.selected_badge.setText(f"✓ {selected_count} Selected · {format_size_human(selected_bytes)}")
             self.selected_badge.setStyleSheet(
                 "background-color: #0F2D37; color: #38BDF8; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; border: 1px solid #1E6B7B;"
             )

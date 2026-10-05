@@ -35,4 +35,3 @@ __all__ = [
     "save_profile_to_settings",
     "save_window_geometry",
 ]
-

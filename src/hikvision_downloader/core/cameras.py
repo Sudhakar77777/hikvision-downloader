@@ -383,7 +383,7 @@ def discover_cameras_isapi(
                     for s_name, s_val in st_tracks_raw.items():
                         try:
                             tracks_mapping[str(s_name)] = TrackId(int(str(s_val)))
-                        except (ValueError, TypeError):
+                        except ValueError, TypeError:
                             pass
 
             if not tracks_mapping:

@@ -1,550 +1,142 @@
-## Why This Project?
+# HikVision Downloader
 
-Hikvision NVRs provide a local web portal (typically accessed via `http://<NVR-IP>/doc/page/login.asp`) to configure settings and export footage over your local network. However, retrieving video through this native browser interface is notoriously unreliable:
+[![CI](https://github.com/Sudhakar77777/hikvision-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/Sudhakar77777/hikvision-downloader/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/hikvision-downloader)](https://pypi.org/project/hikvision-downloader/)
+[![Python 3.14](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/downloads/)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-* **Frequent Freezes & Hangs:** Browser-based transfers routinely stall or crash mid-stream.
-* **Strict Concurrency Limits:** The web app restricts you to downloading only 2–3 files at a time.
-* **Painful Manual Batching:** Exporting 100+ recordings from a single day requires clicking and babysitting every file individually.
+A high-performance, concurrent CCTV footage downloader and management suite for HikVision Network Video Recorders (NVRs). 
+
+Engineered to overcome web browser export freezes, concurrency bottlenecks, and manual batching fatigue, `hikvision-downloader` delivers a direct, multi-worker parallel download engine, authentic camera capability discovery, zero-trust OS Keychain credential security (Apple Keychain, Windows Credential Manager, and Linux Secret Service), and an ergonomic dark/light PySide6 desktop GUI alongside a rich scriptable terminal CLI.
 
 ---
 
-### How It Works
+## Key Features
 
-This tool bypasses the fragile web UI to provide a direct, automated pipeline between your machine and the NVR over LAN:
+- **True Multi-Worker Parallel Engine:** Concurrent download worker pool (1 to 4 streams) with dedicated authenticated sessions, chunked streaming, atomic `.part` buffering, automatic retry backoff, and duplicate skipping.
+- **Dynamic ISAPI Camera Discovery:** Automatically queries live IP channels, authentic camera names (e.g., `MainGate`, `Office`), and HD (Main) / SD (Sub) track IDs directly over HikVision ISAPI without synthetic channel prefixes or required manual configuration.
+- **Intelligent Calendar Discovery:** High-speed monthly recording availability scanning without brute-force day iteration.
+- **Storage & Bandwidth Validation:** Real-time twin segment metrics, available target disk headroom calculations, and aggregated bandwidth speed gauges.
+- **Modern Desktop GUI (PySide6):** Ergonomic desktop console featuring adaptive Dark and Light themes with custom QSS design tokens, interactive date pickers, recording tables, and multi-threaded progress tracking.
+- **Rich Terminal CLI:** Interactive step-by-step console wizard or non-interactive headless CLI for automated batch archiving and cron jobs.
+- **Zero-Trust Credential Security:** Native integration with Apple Keychain, Windows Credential Manager, and Linux Secret Service via `keyring`. Passwords and session cookies are never written in plain text.
+- **Structured Metadata Manifests:** Automatically exports accompanying CSV recording manifests with timestamps, channel metadata, file sizes, and playback URIs.
 
-1. **Local Authentication:** Connects directly to your NVR's endpoint using HTTP Digest/Basic authentication configured via `.env`.
-2. **Interactive Querying:** Prompts you for the target date, camera channel, and timeframe, querying the NVR's internal database directly.
-3. **Format & Stream Selection:** Lets you choose between HD (main stream) or SD (sub-stream) quality.
-4. **Resilient Batch Download:** Pulls the complete list of matching files sequentially or concurrently straight to your local drive—without browser throttling or manual intervention.
+---
 
-# Hikvision Recording Downloader
+## Quick Start & Installation
 
- A small Python CLI for browsing and downloading recordings from a Hikvision NVR.
-
- The tool uses the Hikvision ISAPI interface to:
-
- - Discover which recent dates contain recordings.
-- Let you choose a recording date.
-- Select a camera and stream.
-- Search recordings for that date.
-- Display the available recording files.
-- Download either a selected range or all files.
-- Keep downloads organized by date, camera, and stream.
-- Skip files that have already been downloaded.
-
- The project is intentionally split into small modules so the NVR interaction, date discovery, recording search, camera configuration, and downloading remain independently maintainable.
-
- ## How it works
-
-```
-                    ┌─────────────────────┐
-                    │   Hikvision NVR     │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │  Date Discovery     │
-                    │                     │
-                    │ Current month      │
-                    │ Previous month     │
-                    │ Previous-previous  │
-                    │ (when applicable)  │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Available Dates     │
-                    │                     │
-                    │ 2026-09             │
-                    │ 01 02 03 ... 30     │
-                    │                     │
-                    │ 2026-08             │
-                    │ 30 31               │
-                    └──────────┬──────────┘
-                               │
-                         Select date
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Camera Selection    │
-                    │                     │
-                    │ D1 MainGate         │
-                    │ D2 MainEntrance     │
-                    │ D3 Office           │
-                    │ ...                 │
-                    └──────────┬──────────┘
-                               │
-                         Select stream
-                               │
-                         ┌─────┴─────┐
-                         │           │
-                        HD          SD
-                         │           │
-                         └─────┬─────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Recording Search    │
-                    │                     │
-                    │ NVR CMSearch API    │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Recording List      │
-                    │                     │
-                    │ 1  start ... size  │
-                    │ 2  start ... size  │
-                    │ 3  start ... size  │
-                    │ ...                 │
-                    └──────────┬──────────┘
-                               │
-                       Select files
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Download            │
-                    │                     │
-                    │ Existing → skip     │
-                    │ New → download      │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Organized Archive   │
-                    └─────────────────────┘
+### Option A: Standard Installation via pip
+```bash
+pip install hikvision-downloader
 ```
 
- ## Typical workflow
-
- The first question the application answers is:
-
- > **Which dates currently have recordings?**
-
- For example:
-
-```
-Available recording dates
-=========================
-
-2026-10
-  01  02
-
-2026-09
-  01  02  03  04  05  06  07  08  09  10
-  11  12  13  14  15  16  17  18  19  20
-  21  22  23  24  25  26  27  28  29  30
-
-2026-08
-  30  31
-
-Select date [YYYY-MM-DD]:
+### Option B: Ephemeral Execution via uvx (No Install Required)
+```bash
+uvx hikvision-downloader --help
 ```
 
- Only days reported by the NVR as containing recordings are shown as available.
+---
 
- The application checks the current month and previous month. If the previous month contains recordings, it also checks the month before that.
+## Usage Modes
 
- This avoids unnecessarily querying older months when the NVR has already stopped retaining recordings.
+### 1. Desktop GUI Application
 
- ## Camera and stream selection
-
- After selecting a date, the user selects a camera:
-
-```
-Cameras
-=======================================================
-
-  1. [D1] MainGate
-  2. [D2] MainEntrance
-  3. [D3] Office
-  4. [D4] FirstFL
-  ...
- 11. [D11] TerraceFront
-
-Select camera:
+Launch the desktop operator interface:
+```bash
+hikvision-downloader-gui
 ```
 
- Then the stream:
+**Desktop GUI Capabilities:**
+- **Connection Profile Manager:** Create, edit, and switch between multiple NVR endpoints securely stored in your OS Keychain.
+- **Visual Calendar Discovery:** Instant visual indicators showing dates with recorded footage.
+- **Recording Segment Grid:** Filter, sort, and batch-select video segments with live disk space calculations.
+- **Live Transfer Console:** Real-time transfer throughput (MB/s), individual worker stream progress, and live operational logs.
 
-```
-Stream
-==============================
+---
 
-1. HD
-2. SD
+### 2. Interactive Terminal Wizard
 
-Select stream:
-```
-
- Each camera has two recording tracks:
-
-```
-Camera 1 → HD / SD
-Camera 2 → HD / SD
-Camera 3 → HD / SD
-...
+Launch the interactive CLI wizard:
+```bash
+hikvision-downloader
 ```
 
- The application keeps the NVR-specific track IDs inside the camera configuration rather than exposing them as part of the user workflow.
+The interactive workflow guides you step-by-step:
+1. Scan and select from available recording dates.
+2. Select camera channel by name or ID.
+3. Choose stream quality (HD Main Stream or SD Sub Stream).
+4. Review segments and specify download range (e.g., `all`, `1-10`, `15 5`).
 
- ## Recording search
+---
 
- Once the date, camera, and stream are selected, the application searches the NVR for recordings for that specific day.
+### 3. Headless Scripting & Automation
 
- The results are displayed before anything is downloaded:
-
-```
-====================================================================================================
-   #  Start                 End                    Size (MB)  Name
-====================================================================================================
-   1  2026-09-15 00:00:00  2026-09-15 00:15:00       42.3  ...
-   2  2026-09-15 00:15:00  2026-09-15 00:30:00       41.8  ...
-   3  2026-09-15 00:30:00  2026-09-15 00:45:00       43.1  ...
-====================================================================================================
-Total: 96 recordings | 3.82 GB
-```
-
- A CSV copy of the recording list is also saved alongside the downloaded files.
-
- ## Download selection
-
- The user can select a range of recordings.
-
- For example:
-
-```
-Enter: START COUNT
-
-Examples:
-  1 10   -> download files 1-10
-  16 2   -> download files 16-17
-  50 10  -> download files 50-59
-
-Selection:
-```
-
- This makes it possible to download only a portion of a day's recordings rather than downloading everything.
-
- Existing files are detected and skipped, so the downloader can safely be run again.
-
- ## Output structure
-
- Downloads are organized by:
-
-```
-date
-  └── camera
-       └── stream
-```
-
- For example:
-
-```
-output/
-└── 20260915_D4_FirstFL_HD/
-    ├── 1_<recording>.mp4
-    ├── 2_<recording>.mp4
-    ├── 3_<recording>.mp4
-    └── 2026-09-15_D4_FirstFL_HD_recording-list.csv
-```
-
- A different stream is kept separate:
-
-```
-output/
-├── 20260915_D4_FirstFL_HD/
-└── 20260915_D4_FirstFL_SD/
-```
-
- This makes archives from multiple cameras, dates, and streams easy to distinguish.
-
- ## Project structure
-
- The application is split by responsibility:
-
-```
-src/
-└── hikvision_downloader/
-    ├── __init__.py
-    ├── core/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── dates.py
-    │   ├── cameras.py
-    │   ├── recordings.py
-    │   └── downloads.py
-    ├── cli/
-    │   ├── __init__.py
-    │   ├── app.py
-    │   ├── formatters.py
-    │   └── interactive.py
-    ├── cameras.py
-    ├── config.py
-    ├── dates.py
-    ├── downloads.py
-    ├── http_client.py
-    ├── recordings.py
-    └── downloader.py
-```
-
- ### `downloader.py`
-
- Application entry point and workflow orchestration.
-
- It coordinates:
-
-```
-Date discovery
-      ↓
-Date selection
-      ↓
-Camera selection
-      ↓
-Stream selection
-      ↓
-Recording search
-      ↓
-Recording selection
-      ↓
-Download
-      ↓
-Summary
-```
-
- It deliberately contains very little NVR-specific implementation.
-
- ### `dates.py`
-
- Handles recording-date discovery.
-
- It communicates with the Hikvision daily-distribution API and converts the response into Python date objects.
-
- Responsibilities include:
-
- - Querying a month.
-- Parsing `<record>true</record>`.
-- Determining which recent months need to be queried.
-- Displaying available dates.
-- Validating the selected date.
-
- ### `cameras.py`
-
- Contains the camera configuration and camera/stream selection UI.
-
- A camera definition contains:
-
-```
-camera number
-camera name
-camera address
-HD track
-SD track
-```
-
- The NVR-specific track mapping is kept here so the rest of the application can simply work with a camera and stream.
-
- ### `recordings.py`
-
- Handles recording searches and recording metadata.
-
- Responsibilities include:
-
- - Building CMSearch requests.
-- Parsing search responses.
-- Paging through recording results.
-- Displaying recording lists.
-- Saving recording metadata to CSV.
-- Calculating total recording size.
-
- ### `downloads.py`
-
- Contains the actual download implementation.
-
- Responsibilities include:
-
- - Building Hikvision download URLs.
-- Downloading individual recordings.
-- Writing temporary `.part` files.
-- Renaming completed downloads.
-- Skipping existing files.
-- Reporting download statistics.
-
- ### `http_client.py`
-
- Provides the common HTTP session and retry handling.
-
- This keeps authentication, request retries, timeouts, and HTTP error handling out of the application logic.
-
- ### `config.py`
-
- Loads application configuration and environment variables.
-
- Sensitive connection details belong here or in `.env`, not in source-controlled files.
-
- ## Installation
-
- The project uses Python and can be run with [`uv`](<https://docs.astral.sh/uv/>).
-
- Install the project:
-
-```
-uv sync
-```
-
- ## Configuration
-
- 1. **Environment Setup:** Create a local `.env` file by copying `.env.example` and setting your NVR connection credentials:
-
-```dotenv
-# Hikvision NVR Connection Configuration
-HIKVISION_HOST=192.168.1.10
-HIKVISION_PORT=80
-HIKVISION_USERNAME=admin
-HIKVISION_PASSWORD=your_secure_password
-
-# Concurrency Engine (1 to 4 workers, default: 2)
-HIKVISION_MAX_WORKERS=2
-
-# Optional legacy session cookie fallback (deprecated)
-# HIKVISION_COOKIE=WebSession_d23e9a1027=ENTER_COOKIE_VALUE
-```
-
- Do **not** commit `.env` to the repository.
-
- 2. **Camera Discovery:** Cameras and stream track IDs (Main/Sub) are automatically discovered from your NVR dynamically over ISAPI. Optional local overrides can be specified via `config/cameras.toml` if desired.
-
- ## Running
-
- Run the application interactively with:
+Automate batch exports and scheduled backups using CLI options:
 
 ```bash
-uv run hikvision-downloader
+# Download all recordings for a specific date from Camera 1 (HD) using 4 concurrent workers
+hikvision-downloader --date 2026-09-15 --camera 1 --stream main -w 4 --non-interactive
+
+# Export specific segment ranges with custom target directory
+hikvision-downloader --date 2026-09-15 --camera MainGate --stream main --range 1-20 --output-dir /Volumes/CCTV_Archive --non-interactive
 ```
 
- Launch the native PySide6 Desktop Operator GUI:
+#### CLI Command Options Reference
 
-```bash
-uv run hikvision-downloader-gui
-```
+| Option | Description |
+|---|---|
+| `--host <HOST>` | NVR IP address or hostname. |
+| `--port <PORT>` | NVR HTTP/ISAPI port (default: `80`). |
+| `-u, --username <USER>` | NVR username. |
+| `-p, --password <PASS>` | NVR password. |
+| `-w, --workers <1-4>` | Number of concurrent download workers (default: `2`). |
+| `--date <YYYY-MM-DD>` | Target recording date in ISO format (`YYYY-MM-DD`). |
+| `--camera <ID/NAME>` | Camera channel ID (e.g., `1`) or camera name (e.g., `MainGate`). |
+| `--stream <main\|sub>` | Stream quality: `main` (HD) or `sub` (SD). |
+| `--range <RANGE>` | Segment range: `all`, `START-END` (e.g. `1-10`), or `START COUNT` (e.g. `1 10`). |
+| `--output-dir <PATH>` | Target export directory path. |
+| `--refresh-cameras` | Force fresh camera capability discovery from NVR. |
+| `--non-interactive` | Run in non-interactive batch mode (fails if required options are omitted). |
+| `--version` | Display program version number and exit. |
+| `-h, --help` | Display command documentation and exit. |
 
- Or run in headless automation mode with flags:
+---
 
-```bash
-# Download all recordings from Camera 1 HD stream for a specific date using 2 concurrent workers
-uv run hikvision-downloader --date 2026-09-15 --camera 1 --stream main -w 2 --non-interactive
+## Supported Hardware & Compatibility
 
-# Download a specific range of recordings with custom destination
-uv run hikvision-downloader --date 2026-09-15 --camera 1 --stream main --range 1-10 --output-dir ./archive --non-interactive
-```
+`hikvision-downloader` connects directly over your local area network (LAN) using standard **HikVision ISAPI v2.0+** XML/HTTP protocols:
 
- ### Command-Line Arguments
+- **HikVision NVR Series:** DS-7600 series, DS-7700 series, DS-9600 series, and hybrid DVR/NVR appliances.
+- **Compatible OEM Brands:** Annke, LTS, Hilook, Trendnet, and other OEM rebrands supporting HikVision ISAPI endpoints.
+- **Authentication Protocols:** HTTP Basic and HTTP Digest authentication supported out-of-the-box.
 
- | Argument | Description |
- |---|---|
- | `--host <HOST>` | NVR IP address or hostname (overrides `HIKVISION_HOST` from `.env`). |
- | `--port <PORT>` | NVR HTTP/ISAPI port (overrides `HIKVISION_PORT` from `.env`, default: `80`). |
- | `-u, --username <USER>` | NVR username (overrides `HIKVISION_USERNAME` from `.env`). |
- | `-p, --password <PASS>` | NVR password (overrides `HIKVISION_PASSWORD` from `.env`). |
- | `-w, --workers <1-4>` | Number of concurrent download workers (1 to 4, default: `2`). |
- | `--refresh-cameras` | Bypass discovery cache and force fresh camera discovery from NVR. |
- | `--date <YYYY-MM-DD>` | Target recording date in ISO format. |
- | `--camera <ID/NAME>` | Camera channel number (e.g. `1`) or camera name (e.g. `FrontGate`). |
- | `--stream <main\|sub>` | Stream quality: `main` (HD) or `sub` (SD). |
- | `--range <RANGE>` | Recording range: `all`, `START-END` (e.g. `1-10`), or `START COUNT` (e.g. `1 10`). |
- | `--output-dir <PATH>` | Custom output directory path. |
- | `--non-interactive` | Run without interactive prompts (fails if required options are omitted). |
- | `--version` | Show program version number and exit. |
- | `-h, --help` | Show command documentation and exit options. |
+---
 
- When run interactively without flags, the workflow guides you through:
+## Security Posture & Privacy
 
+- **Native Vault Storage:** Connection credentials stored via the GUI profile manager are routed directly to your operating system's native secure enclave:
+  - **macOS:** Apple Keychain Services (`Security.framework`).
+  - **Windows:** Windows Credential Manager (`wincred`).
+  - **Linux:** Secret Service API / FreeDesktop DBus secret service (`libsecret`).
+- **Zero Plaintext Secrets:** Passwords and session cookies are never written to disk files or printed to logs.
+- **Local Network Isolation:** All communication occurs strictly between your local machine and your NVR endpoint. No telemetry, third-party cloud services, or external network requests are made.
 
-```
-Available dates
-      ↓
-Select date
-      ↓
-Select camera
-      ↓
-Select stream
-      ↓
-Search recordings
-      ↓
-Select recordings
-      ↓
-Confirm
-      ↓
-Download
-```
+---
 
- ## Example
+## Documentation
 
- Suppose the user wants recordings from September 15 from camera D4 using the HD stream.
+For technical details, architecture specifications, and contributor guides, see:
+- [Technical Development Guide](file:///Volumes/MinionDev/Workspace/CCTV/hikvision-downloader/docs/development.md)
+- [System Architecture](file:///Volumes/MinionDev/Workspace/CCTV/hikvision-downloader/docs/architecture.md)
+- [System Requirements](file:///Volumes/MinionDev/Workspace/CCTV/hikvision-downloader/docs/requirements.md)
+- [Product Roadmap](file:///Volumes/MinionDev/Workspace/CCTV/hikvision-downloader/docs/roadmap.md)
 
- The workflow is approximately:
+---
 
-```
-Select date [YYYY-MM-DD]: 2026-09-15
+## Licensing & Compliance
 
-Select camera: 4
+- **License:** Distributed under the **GNU Affero General Public License v3** (`AGPL-3.0-or-later`). See [LICENSE](file:///Volumes/MinionDev/Workspace/CCTV/hikvision-downloader/LICENSE) for full license text.
+- **Third-Party Notices:** See [THIRD_PARTY_NOTICES.md](file:///Volumes/MinionDev/Workspace/CCTV/hikvision-downloader/THIRD_PARTY_NOTICES.md) for PySide6 LGPLv3 dynamic linking disclosures and open-source library attributions.
 
-Stream
-==============================
-1. HD
-2. SD
-
-Select stream: 1
-```
-
- The application searches the selected day's recordings and presents the available files.
-
- The user could then request:
-
-```
-Selection: 1 10
-```
-
- which downloads the first ten recordings.
-
- The resulting archive would look similar to:
-
-```
-output/
-└── 20260915_D4_FirstFL_HD/
-    ├── 1_....mp4
-    ├── 2_....mp4
-    ├── ...
-    ├── 10_....mp4
-    └── 2026-09-15_D4_FirstFL_HD_recording-list.csv
-```
-
- ## Design goals
-
- The project intentionally follows a few simple principles:
-
- - **SRP** — each module has one clear responsibility.
-- **DRY** — common HTTP, parsing, timing, and download behavior is centralized.
-- **Explicit configuration** — camera and stream mappings are defined in one place.
-- **Safe downloads** — incomplete files are written as `.part` files and existing completed files are skipped.
-- **Small orchestration layer** — `downloader.py` coordinates the workflow instead of implementing every operation itself.
-- **Human-readable output** — the CLI is designed for interactive use rather than being a thin wrapper around API calls.
-- **No hardcoded infrastructure in documentation** — deployment-specific addresses and credentials stay local.
-
-## Running Tests & Quality Checks
-
-Run the offline test suite:
-```bash
-uv run pytest -m "not integration"
-```
-
-Run static type checking and linting:
-```bash
-uv run mypy src tests
-uv run ruff check src tests
-```
-
- ## Important note
-
- This project is designed for use with Hikvision NVR systems exposing the relevant ISAPI recording endpoints.
- Hikvision firmware versions and NVR configurations can differ, so endpoint behavior and available metadata may vary between systems.
+Copyright (c) 2026 Arivedha. All rights reserved.

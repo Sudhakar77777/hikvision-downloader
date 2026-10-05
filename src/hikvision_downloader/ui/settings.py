@@ -91,11 +91,7 @@ def save_profile_to_settings(
     try:
         profiles = load_profiles_from_settings(s)
         # Filter out existing matching (host, port, username)
-        filtered = [
-            p
-            for p in profiles
-            if not (p.host.lower() == clean_host.lower() and p.port == port and p.username == clean_user)
-        ]
+        filtered = [p for p in profiles if not (p.host.lower() == clean_host.lower() and p.port == port and p.username == clean_user)]
         # Insert current profile at head
         new_profile = ProfileMetadata(
             host=clean_host,
