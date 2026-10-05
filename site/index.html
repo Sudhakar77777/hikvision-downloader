@@ -38,7 +38,7 @@
           </svg>
         </div>
         <span class="brand-title">HikVision Downloader</span>
-        <span class="brand-badge">v0.1.1</span>
+        <span class="brand-badge">v0.1.2</span>
       </a>
 
       <ul class="nav-links">
@@ -99,6 +99,61 @@
           </svg>
           CLI Terminal
         </a>
+      </div>
+
+      <!-- First-Time macOS Launch Guidance -->
+      <div class="macos-helper-container">
+        <details class="macos-helper-disclosure" id="macos-launch-guide">
+          <summary class="macos-helper-summary">
+            <span class="macos-summary-label">
+              <svg class="macos-summary-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 1.01-2.87-.96.04-2.12.64-2.8 1.44-.59.69-.99 1.77-.96 2.82 1.07.08 2.13-.57 2.75-1.39z"/>
+              </svg>
+              <span>First-Time macOS Launch Guidance</span>
+            </span>
+            <span class="macos-summary-toggle">
+              <span class="toggle-text">Show Steps</span>
+              <svg class="toggle-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </span>
+          </summary>
+          
+          <div class="macos-helper-card">
+            <div class="macos-card-header">
+              <h3 class="macos-card-title">First-Time macOS Launch</h3>
+              <span class="macos-card-tag">Gatekeeper Notice</span>
+            </div>
+            
+            <p class="macos-card-desc">
+              macOS Gatekeeper automatically flags unsigned open-source applications by default with a security prompt (<em>&ldquo;Apple could not verify the developer&rdquo;</em>). To launch the app seamlessly:
+            </p>
+
+            <div class="macos-method-section">
+              <div class="macos-method-title">Primary GUI Steps</div>
+              <ol class="macos-steps">
+                <li class="macos-step-item">
+                  <span class="step-number">1</span>
+                  <div class="step-content">Drag <strong>HikVision Downloader.app</strong> to your <code>/Applications</code> folder.</div>
+                </li>
+                <li class="macos-step-item">
+                  <span class="step-number">2</span>
+                  <div class="step-content">Right-click (or Control-click) <strong>HikVision Downloader.app</strong> and choose <strong>&ldquo;Open&rdquo;</strong>, then confirm <strong>&ldquo;Open Anyway&rdquo;</strong> (or grant permission via <em>macOS System Settings &rarr; Privacy &amp; Security</em>).</div>
+                </li>
+              </ol>
+            </div>
+
+            <div class="macos-method-section">
+              <div class="macos-method-title">Optional 1-Line Terminal Bypass</div>
+              <div class="terminal-card terminal-inline-card">
+                <div class="terminal-inline-content">
+                  <span class="terminal-prompt">$</span><code class="terminal-command">xattr -d com.apple.quarantine "/Applications/HikVision Downloader.app"</code>
+                </div>
+                <button class="copy-btn" onclick="copyMacBypass(this)" aria-label="Copy Terminal Bypass Command">Copy</button>
+              </div>
+            </div>
+          </div>
+        </details>
       </div>
 
       <div class="hero-meta">
@@ -340,6 +395,31 @@
           btn.style.color = "";
           btn.style.borderColor = "";
         }, 2000);
+      });
+    }
+
+    function copyMacBypass(btn) {
+      const text = 'xattr -d com.apple.quarantine "/Applications/HikVision Downloader.app"';
+      navigator.clipboard.writeText(text).then(() => {
+        const original = btn.innerText;
+        btn.innerText = "Copied!";
+        btn.style.color = "#2DD4BF";
+        btn.style.borderColor = "#2DD4BF";
+        setTimeout(() => {
+          btn.innerText = original;
+          btn.style.color = "";
+          btn.style.borderColor = "";
+        }, 2000);
+      });
+    }
+
+    const macDisclosure = document.getElementById('macos-launch-guide');
+    if (macDisclosure) {
+      macDisclosure.addEventListener('toggle', () => {
+        const toggleText = macDisclosure.querySelector('.toggle-text');
+        if (toggleText) {
+          toggleText.textContent = macDisclosure.open ? 'Hide Steps' : 'Show Steps';
+        }
       });
     }
   </script>
