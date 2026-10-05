@@ -21,8 +21,8 @@ jobs:
             artifact_name: HikVision-Downloader-macOS.dmg
             artifact_pattern: dist/HikVision-Downloader-macOS.dmg
           - os: windows-latest
-            artifact_name: HikVision-Downloader-Windows-x64.zip
-            artifact_pattern: dist/HikVision-Downloader-Windows-x64.zip
+            artifact_name: HikVision-Downloader-Windows-x64.exe
+            artifact_pattern: dist/HikVision-Downloader-Windows-x64.exe
 
     steps:
       - name: Checkout repository
@@ -53,7 +53,7 @@ jobs:
           chmod +x packaging/build_macos.sh
           ./packaging/build_macos.sh
 
-      - name: Build Windows Executable & ZIP
+      - name: Build Windows Standalone Executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |

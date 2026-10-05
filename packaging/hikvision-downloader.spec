@@ -59,7 +59,7 @@ hiddenimports += collect_submodules("keyring.backends")
 hiddenimports += collect_submodules("pydantic")
 
 # Target entry script
-entry_script = str(src_dir / "hikvision_downloader" / "ui" / "main_window.py")
+entry_script = str(spec_dir / "run_app.py")
 
 # Icon path depending on platform
 mac_icon = str(packaging_assets_dir / "hikvision-downloader.icns") if (packaging_assets_dir / "hikvision-downloader.icns").exists() else None
@@ -70,14 +70,14 @@ block_cipher = None
 
 a = Analysis(
     [entry_script],
-    pathex=[str(src_dir)],
+    pathex=[str(src_dir), str(repo_root)],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "scipy", "numpy", "pandas"],
+    excludes=["tkinter", "matplotlib", "scipy", "numpy", "pandas", "mypy", "pytest", "ruff", "_pytest", "pluggy", "types_requests"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -86,37 +86,58 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=True,
-    name="hikvision-downloader",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=app_icon,
-)
+if sys.platform == "win32":
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name="HikVision-Downloader-Windows-x64",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=app_icon,
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="hikvision-downloader",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=app_icon,
+    )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="hikvision-downloader",
-)
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name="hikvision-downloader",
+    )
 
-if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="HikVision Downloader.app",
@@ -127,8 +148,8 @@ if sys.platform == "darwin":
             "CFBundleDisplayName": "HikVision Downloader",
             "CFBundleGetInfoString": "HikVision CCTV Video Archiving & Downloader",
             "CFBundleIdentifier": "com.arivedha.hikvision-downloader",
-            "CFBundleVersion": "0.1.1",
-            "CFBundleShortVersionString": "0.1.1",
+            "CFBundleVersion": "0.1.2",
+            "CFBundleShortVersionString": "0.1.2",
             "NSHumanReadableCopyright": "Copyright © 2026 Arivedha. All rights reserved.",
             "NSHighResolutionCapable": "True",
             "LSApplicationCategoryType": "public.app-category.utilities",

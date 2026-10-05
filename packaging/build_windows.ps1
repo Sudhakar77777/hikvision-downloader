@@ -9,24 +9,22 @@ Set-Location $RepoRoot
 Write-Host "=== [1/3] Generating Application Icons ===" -ForegroundColor Cyan
 uv run python packaging/generate_icons.py
 
-Write-Host "=== [2/3] Building Windows Binary via PyInstaller ===" -ForegroundColor Cyan
+Write-Host "=== [2/3] Building Windows Standalone Executable via PyInstaller ===" -ForegroundColor Cyan
 uv run pyinstaller packaging/hikvision-downloader.spec --clean --noconfirm
 
-Write-Host "=== [3/3] Creating Release ZIP Archive ===" -ForegroundColor Cyan
-$DistFolder = Join-Path $RepoRoot "dist\hikvision-downloader"
-$ZipOutput = Join-Path $RepoRoot "dist\HikVision-Downloader-Windows-x64.zip"
+Write-Host "=== [3/3] Verifying Release Executable ===" -ForegroundColor Cyan
+$ExeOutput = Join-Path $RepoRoot "dist\HikVision-Downloader-Windows-x64.exe"
 
-if (Test-Path $ZipOutput) {
-    Remove-Item $ZipOutput -Force
+if (-not (Test-Path $ExeOutput)) {
+    $AltExe = Join-Path $RepoRoot "dist\hikvision-downloader.exe"
+    if (Test-Path $AltExe) {
+        Move-Item $AltExe $ExeOutput -Force
+    } else {
+        Write-Error "Error: Windows executable '$ExeOutput' was not found."
+        exit 1
+    }
 }
-
-if (-not (Test-Path $DistFolder)) {
-    Write-Error "Error: Dist folder '$DistFolder' was not found."
-    exit 1
-}
-
-Compress-Archive -Path "$DistFolder\*" -DestinationPath $ZipOutput -CompressionLevel Optimal
 
 Write-Host "=== Windows Build Completed Successfully ===" -ForegroundColor Green
-Write-Host "Artifact: $ZipOutput"
-Get-Item $ZipOutput | Format-List Length, LastWriteTime
+Write-Host "Artifact: $ExeOutput"
+Get-Item $ExeOutput | Format-List Length, LastWriteTime

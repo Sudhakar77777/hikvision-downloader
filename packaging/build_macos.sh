@@ -12,12 +12,15 @@ uv run python packaging/generate_icons.py
 echo "=== [2/4] Building macOS Application Bundle via PyInstaller ==="
 uv run pyinstaller packaging/hikvision-downloader.spec --clean --noconfirm
 
-echo "=== [3/4] Verifying .app Bundle ==="
+echo "=== [3/4] Verifying and Ad-Hoc Signing .app Bundle ==="
 APP_BUNDLE="dist/HikVision Downloader.app"
 if [ ! -d "${APP_BUNDLE}" ]; then
     echo "Error: Application bundle '${APP_BUNDLE}' was not created." >&2
     exit 1
 fi
+
+echo "Signing application bundle with ad-hoc signature..."
+codesign --force --deep -s - "${APP_BUNDLE}"
 
 echo "=== [4/4] Creating Drag-and-Drop DMG Installer ==="
 DMG_OUTPUT="dist/HikVision-Downloader-macOS.dmg"
