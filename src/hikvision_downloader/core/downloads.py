@@ -130,11 +130,12 @@ def download_recording(
             },
         )
 
+        is_cancelled = False
         with response, open(temp_file, "wb") as file:
             for chunk in response.iter_content(chunk_size=256 * 1024):
                 if cancel_event is not None and cancel_event.is_set():
-                    temp_file.unlink(missing_ok=True)
-                    return False, time.monotonic() - started, ByteCount(0), False, "Download cancelled"
+                    is_cancelled = True
+                    break
                 if chunk:
                     file.write(chunk)
                     downloaded_bytes += len(chunk)
@@ -159,11 +160,21 @@ def download_recording(
                         )
                         last_emit_time = now
 
+        if is_cancelled:
+            try:
+                temp_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False, time.monotonic() - started, ByteCount(0), False, "Download cancelled"
+
         actual_size = temp_file.stat().st_size
         duration = time.monotonic() - started
 
         if actual_size == 0:
-            temp_file.unlink(missing_ok=True)
+            try:
+                temp_file.unlink(missing_ok=True)
+            except OSError:
+                pass
             return False, duration, ByteCount(0), False, "Empty file received from NVR"
 
         temp_file.rename(destination)
@@ -191,7 +202,10 @@ def download_recording(
 
     except (OSError, ValueError, RuntimeError, requests.RequestException) as exc:
         duration = time.monotonic() - started
-        temp_file.unlink(missing_ok=True)
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError:
+            pass
         return False, duration, ByteCount(0), False, str(exc)
 
 

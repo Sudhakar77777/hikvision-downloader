@@ -35,13 +35,19 @@
 - Removed `environment:` block to comply with PyPI publisher configuration registered with `Environment: (Any)`.
 - Automates `uv build` and publishing via `pypa/gh-action-pypi-publish@release/v1`.
 
+### 5. Windows Platform Compatibility Fixes
+- **Path Separators in CLI Test (`tests/unit/test_cli.py`)**:
+  - Replaced hardcoded POSIX `/path/to/output` assertion with platform-native `f"Output folder:   {output_path}"` to ensure tests pass identically on Windows (`\path\to\output`) and POSIX.
+- **File Handle Release Prior to Unlink (`src/hikvision_downloader/core/downloads.py`)**:
+  - In `download_recording`, ensured the `with response, open(temp_file, "wb") as file:` context manager exits and releases all file descriptors before attempting `temp_file.unlink(missing_ok=True)` on cancellation or error.
+  - Wrapped `temp_file.unlink()` in `try...except OSError: pass` across all cleanup paths to prevent Windows `WinError 32` file locking exceptions.
+
 ---
 
 ## 2. Verification Results
 
 ### Code Formatting & Linting:
-- **`uv run ruff format .`**: 10 files reformatted, 106 files already formatted.
-- **`uv run ruff format --check .`**: Exited 0 (116 files checked).
+- **`uv run ruff format --check .`**: Exited 0 (`117 files already formatted`).
 - **`uv run ruff check .`**: Exited 0 (`All checks passed!`).
 
 ### Static Type Checking:
@@ -50,11 +56,11 @@
 ### Distribution Package Build:
 - **`uv build`**: Exited 0
   - Generated: `dist/hikvision_downloader-0.1.0.tar.gz`
-  - Generated: `dist/hikvision_downloader-0.1.0-py3-none-any.whl`
+  - Generated: `dist/hikvision_downloader-0.1.0-py3-none-any.whl` (with populated README description and package metadata).
 
 ### Test Suite Execution:
 - **`QT_QPA_PLATFORM=offscreen uv run pytest`**: Exited 0
-  - **171 passed, 1 skipped** in 74.64s across all functional, unit, and integration test modules.
+  - **171 passed, 1 skipped** in 73.93s across all functional, unit, and integration test modules.
 
 ---
 
@@ -62,3 +68,4 @@
 
 - **PyPI Environment Block:** Omitted the `environment:` block in `.github/workflows/publish-pypi.yml` as requested to ensure OIDC token verification succeeds with pending publishers configured for `(Any)` environment.
 - **Full Test Suite in CI:** Removed `-m "not integration"` in `.github/workflows/ci.yml` and enabled `QT_QPA_PLATFORM: offscreen` across all runners so all offline unit and mocked integration tests run out-of-the-box.
+- **Windows File Locking Safety:** Protected partial `.part` file unlinks by ensuring open write handles are closed prior to deletion, eliminating `[WinError 32]` on Windows runners.

@@ -711,6 +711,7 @@ def test_display_download_summary_with_time_span(sample_cameras: dict[CameraNumb
         downloaded_bytes=ByteCount(20_000_000),
         total_duration_seconds=5.0,
     )
+    output_path = Path("/path/to/output")
     display_download_summary(
         camera=camera,
         stream=StreamType.MAIN,
@@ -720,12 +721,12 @@ def test_display_download_summary_with_time_span(sample_cameras: dict[CameraNumb
         search_duration=0.2,
         result=res,
         recordings=recs,
-        output_dir=Path("/path/to/output"),
+        output_dir=output_path,
     )
     captured = capsys.readouterr().out
     assert f"Time span:       {target_date_str} 00:00:00 -> {target_date_str} 00:30:00" in captured
     assert "Recordings:      1-2" in captured
-    assert "Output folder:   /path/to/output" in captured
+    assert f"Output folder:   {output_path}" in captured
 
 
 def test_multi_progress_display_tty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
