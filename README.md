@@ -1,7 +1,8 @@
 # HikVision Downloader
 
-[![CI](https://github.com/Sudhakar77777/hikvision-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/Sudhakar77777/hikvision-downloader/actions/workflows/ci.yml)
+[![Website](https://img.shields.io/badge/Website-Download%20Portal-2DD4BF?style=flat&logo=githubpages&logoColor=white)](https://sudhakar77777.github.io/hikvision-downloader/)
 [![PyPI](https://img.shields.io/pypi/v/hikvision-downloader)](https://pypi.org/project/hikvision-downloader/)
+[![CI](https://github.com/Sudhakar77777/hikvision-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/Sudhakar77777/hikvision-downloader/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/downloads/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
