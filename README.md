@@ -53,6 +53,10 @@ hikvision-downloader-gui
 - **Recording Segment Grid:** Filter, sort, and batch-select video segments with live disk space calculations.
 - **Live Transfer Console:** Real-time transfer throughput (MB/s), individual worker stream progress, and live operational logs.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Sudhakar77777/hikvision-downloader/main/docs/assets/gui-dark.jpg" alt="HikVision Downloader Dark Mode" width="850">
+</p>
+
 ---
 
 ### 2. Interactive Terminal Wizard
